@@ -52,42 +52,59 @@ class BLEManager:
 
     def find_and_connect_uplink(self):
     
-        print("\n--- A procurar novo Uplink ---")
-        nearby_devices = scan_nearby_devices(duration=10)
+        print("\n--- A procurar novo Uplink (Otimizado) ---")
+        
+        # CORREÇÃO: Usar uma variável para armazenar o resultado do scan
+        # ASSUMIR que 'scan_nearby_devices' retorna: (mac, name, hop_count, rssi)
+        nearby_devices_data = scan_nearby_devices(duration=10)
 
-        # 1. Analisar os dispositivos encontrados para encontrar um potencial uplink
+        # 1. Analisar os dispositivos encontrados e aplicar a lógica de seleção
         potential_uplinks = []
-        for mac, name in nearby_devices:
-            # Por enquanto, apenas tenta ligar ao primeiro, 
-            # no futuro, será preciso obter o NID e Hop Count para a escolha.
-            # print(f"Dispositivo vizinho encontrado: {name} ({mac})") 
-            potential_uplinks.append(mac)
+        # O loop agora usa a variável definida na linha anterior
+        for mac, name, hop_count, rssi in nearby_devices_data:
+            # Filtro: Apenas considera nós que já anunciam uma rota (hop_count >= 0)
+            if hop_count >= 0:
+                potential_uplinks.append({
+                    "mac": mac,
+                    "name": name,
+                    "hop_count": hop_count,
+                    "rssi": rssi  # RSSI é negativo, maior valor é melhor sinal
+                })
 
         if not potential_uplinks:
-            print("[!] Nenhum dispositivo vizinho encontrado.")
+            print("[!] Nenhum dispositivo vizinho elegível encontrado.")
             return False
 
-        # 2. Tentar conectar-se ao primeiro dispositivo disponível (Simplificado)
-        chosen_uplink_addr = potential_uplinks[0]
+        # 2. Lógica de Uplink Otimizada: Menor Hop Count -> Melhor RSSI
+        
+        # Inicializar a melhor escolha com o primeiro candidato
+        best_uplink = potential_uplinks[0]
+
+        # Iterar para encontrar o melhor nó
+        for uplink in potential_uplinks[1:]:
+            
+            # CRITÉRIO PRIMÁRIO: Menor Hop Count é prioridade
+            if uplink['hop_count'] < best_uplink['hop_count']:
+                best_uplink = uplink
+                
+            # CRITÉRIO SECUNDÁRIO: Se o Hop Count for igual, escolher o melhor RSSI
+            elif uplink['hop_count'] == best_uplink['hop_count']:
+                if uplink['rssi'] > best_uplink['rssi']:
+                    best_uplink = uplink
+
+        # 3. Tentar conectar-se ao dispositivo escolhido
+        chosen_uplink_addr = best_uplink['mac']
+        
+        print(f"[*] Melhor Uplink escolhido: {best_uplink['name']} ({chosen_uplink_addr})")
+        print(f"    Métricas: Hop Count = {best_uplink['hop_count']}, RSSI = {best_uplink['rssi']} dBm")
+
         if self.connect_to_device(chosen_uplink_addr):
+            # O Hop Count do nó local é o do vizinho + 1
+            self.hop_count = best_uplink['hop_count'] + 1
             self.uplink_addr = chosen_uplink_addr
-            # No futuro, o hop_count será estabelecido pelo heartbeat/protocolo de rede
-            # self.hop_count = ?? 
             print(f"[+] Uplink estabelecido com {self.uplink_addr}.")
+            print(f"[#] Meu novo Hop Count é: {self.hop_count}")
             return True
         
-        print("[!] Não foi possível estabelecer um uplink.")
+        print("[!] Não foi possível estabelecer um uplink com o nó otimizado.")
         return False
-
-
-if __name__ == "__main__":
-    manager = BLEManager("NID_EXEMPLO_A")
-    manager.find_and_connect_uplink()
-    
-    # Simular uma desconexão após 5 segundos
-    # if manager.uplink_addr:
-    #     time.sleep(5)
-    #     manager.disconnect_from_device(manager.uplink_addr)
-    #     manager.uplink_addr = None
-    #     manager.hop_count = -1
-    #     print("Fim da simulação.")

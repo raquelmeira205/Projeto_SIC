@@ -38,3 +38,15 @@ class PacketHeader:
             print(f"Aviso: Tamanho do payload ({len(payload_bytes)}) difere do declarado ({payload_len})")
 
         return src_nid, dest_nid, msg_type, payload_bytes
+    
+class HeartbeatPayload:
+
+    @staticmethod
+    def pack(sequence_number, signature):
+        return struct.pack('!I', sequence_number) + signature
+
+    @staticmethod
+    def unpack(payload):
+        seq_num = struct.unpack('!I', payload[:4])[0]
+        signature = payload[4:]
+        return seq_num, signature

@@ -2,9 +2,7 @@ import time
 from common.ble_utils import get_device_object, scan_nearby_devices
 
 class BLEManager:
-    """
-    Gerencia a camada Bluetooth de um Node IoT, incluindo uplink e downlinks.
-    """
+   
     def __init__(self, node_nid):
         self.node_nid = node_nid
         # O MAC address do uplink atual
@@ -54,8 +52,7 @@ class BLEManager:
     
         print("\n--- A procurar novo Uplink (Otimizado) ---")
         
-        # CORREÇÃO: Usar uma variável para armazenar o resultado do scan
-        # ASSUMIR que 'scan_nearby_devices' retorna: (mac, name, hop_count, rssi)
+        # scan_nearby_devices' retorna: (mac, name, hop_count, rssi)
         nearby_devices_data = scan_nearby_devices(duration=10)
 
         # 1. Analisar os dispositivos encontrados e aplicar a lógica de seleção
@@ -108,3 +105,49 @@ class BLEManager:
         
         print("[!] Não foi possível estabelecer um uplink com o nó otimizado.")
         return False
+
+
+    def trigger_chain_disconnection(self):
+        """
+        Executa a lógica de 'Chain Disconnection'
+        """
+        print(f"\n[!!!] CRÍTICO: Perda de Uplink ({self.uplink_addr}) detetada!")
+        
+        previous_uplink = self.uplink_addr
+        self.uplink_addr = None
+        self.hop_count = -1
+        
+        # Desconecta os filhos
+        downlink_macs = list(self.downlinks.keys())
+        if downlink_macs:
+            print(f"[Action] A derrubar {len(downlink_macs)} downlinks...")
+            for child_mac in downlink_macs:
+                print(f"   -> Desconectando filho: {child_mac}")
+                self.disconnect_from_device(child_mac)
+                del self.downlinks[child_mac]
+        
+        print(f"[SUCESSO] Nó desconectado de {previous_uplink}. Reiniciando...") 
+
+
+
+    def monitor_connection_status(self):
+        """
+        Verifica se o Uplink atual ainda está conectado.
+        Deve ser chamado periodicamente pelo sistema principal.
+        """
+        if self.uplink_addr:
+            device = get_device_object(self.uplink_addr)
+            
+            # Se não conseguimos obter o objeto ou a propriedade 'Connected' for False
+            # Nota: Dependendo da lib D-Bus, pode ser device.Connected ou device.Get(..., "Connected")
+            try:
+                is_connected = device.Connected 
+            except:
+                is_connected = False
+            
+            if not is_connected:
+                print(f"[Alert] O Uplink {self.uplink_addr} deixou de responder.")
+                self.trigger_chain_disconnection()
+
+
+      

@@ -1,10 +1,7 @@
 import os
 import sys
-
-#importar o módulo ca_utils
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from pki_tools import ca_utils
+import secrets
+import ca_utils
 
 def main():
     output_dir = "certs"
@@ -23,32 +20,27 @@ def main():
 
     # ----- Sink -----
     print("A gerar certificado Sink...")
+    sink_nid = secrets.randbits(128)
     sink_key, sink_cert = ca_utils.issue_certificate(
-        ca_key, ca_cert, "Sink Node", is_sink=True, nid=0
+        ca_key, ca_cert, "Sink Node", is_sink=True, nid=sink_nid
     )
     ca_utils.save_key(sink_key, os.path.join(output_dir, "sink.key"))
     ca_utils.save_cert(sink_cert, os.path.join(output_dir, "sink.crt"))
-    print("Sink pronto.")
+    print(f"Sink pronto (NID: {sink_nid}).")
 
 
-    # ----- Node A -----
-    print("A gerar certificado Node A...")
-    node_a_key, node_a_cert = ca_utils.issue_certificate(
-        ca_key, ca_cert, "Node A", is_sink=False, nid=1
-    )
-    ca_utils.save_key(node_a_key, os.path.join(output_dir, "nodeA.key"))
-    ca_utils.save_cert(node_a_cert, os.path.join(output_dir, "nodeA.crt"))
-    print("Node A pronto.")
-
-
-    # ----- Node B -----
-    print("A gerar certificado Node B...")
-    node_b_key, node_b_cert = ca_utils.issue_certificate(
-        ca_key, ca_cert, "Node B", is_sink=False, nid=2
-    )
-    ca_utils.save_key(node_b_key, os.path.join(output_dir, "nodeB.key"))
-    ca_utils.save_cert(node_b_cert, os.path.join(output_dir, "nodeB.crt"))
-    print("Node B pronto.")
+    # ----- Nodes A-E -----
+    nodes = ["NodeA", "NodeB", "NodeC", "NodeD", "NodeE"]
+    
+    for node_name in nodes:
+        print(f"A gerar certificado {node_name}...")
+        nid = secrets.randbits(128)
+        key, cert = ca_utils.issue_certificate(
+            ca_key, ca_cert, node_name, is_sink=False, nid=nid
+        )
+        ca_utils.save_key(key, os.path.join(output_dir, f"{node_name}.key"))
+        ca_utils.save_cert(cert, os.path.join(output_dir, f"{node_name}.crt"))
+        print(f"{node_name} pronto (NID: {nid}).")
 
 if __name__ == "__main__":
     main()

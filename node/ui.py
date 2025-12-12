@@ -1,94 +1,128 @@
 import tkinter as tk
-from tkinter import ttk
-import random
+from tkinter import ttk, messagebox
+import threading
 import time
-
-# --- MOCKUP DE DADOS (Substituir por dados reais do seu Node) ---
-# Em um sistema real, o NID seria lido de um ficheiro de certificado/configuração.
-# O projeto requer um NID de 128 bits, aqui simulado como um hex string.
-MOCK_DEVICE_NID = "1A2B3C4D5E6F7890ABCDEF0123456789"
-
-# Em um sistema real, estas variáveis seriam atualizadas pelo módulo de roteamento
-# (node/router) quando o uplink se estabelece ou falha.
-mock_uplink_status = "Desconectado (Procurando Uplink...)"
-mock_uplink_nid = "N/A"
-
-# Mockup para a cor de status
-STATUS_COLOR_DISCONNECTED = "red"
-STATUS_COLOR_CONNECTED = "green"
-mock_status_color = STATUS_COLOR_DISCONNECTED
-# -----------------------------------------------------------------
 
 class IoTNodeUI:
     """
-    Boilerplate da Interface de Utilizador para o dispositivo IoT (Node).
-    Exibe o NID do dispositivo e o status do Uplink.
+    Interface de Utilizador para o dispositivo IoT (Node).
+    Exibe status da rede e permite controlo básico.
     """
-    def __init__(self, master):
+    def __init__(self, master, node_nid, ble_manager, router):
         self.master = master
-        master.title("SIC IoT Node UI")
+        self.node_nid = node_nid
+        self.ble_manager = ble_manager
+        self.router = router
+        
+        master.title(f"SIC Node: {node_nid[:4]}...")
+        master.geometry("500x600")
 
         # Configuração básica de estilos
         style = ttk.Style()
         style.configure("TLabel", font=("Arial", 10))
+        style.configure("Header.TLabel", font=("Arial", 12, "bold"))
 
         # --- Título ---
-        self.title_label = ttk.Label(master, text="Dispositivo IoT - Rede Ad-hoc", font=("Arial", 14, "bold"))
-        self.title_label.grid(row=0, column=0, columnspan=2, pady=10)
+        ttk.Label(master, text="Dispositivo IoT - Rede Ad-hoc", font=("Arial", 14, "bold")).pack(pady=10)
+        
+        # --- Info Própria ---
+        info_frame = ttk.LabelFrame(master, text="Info Local")
+        info_frame.pack(fill="x", padx=10, pady=5)
+        
+        ttk.Label(info_frame, text=f"NID: {self.node_nid}").pack(anchor="w", padx=5)
+        self.hop_label = ttk.Label(info_frame, text="Hop Count: -1")
+        self.hop_label.pack(anchor="w", padx=5)
 
-        # --- NID do Dispositivo ---
-        ttk.Label(master, text="NID do Dispositivo:", font=("Arial", 10, "bold")).grid(row=1, column=0, padx=10, pady=5, sticky="w")
-        self.nid_label = ttk.Label(master, text=MOCK_DEVICE_NID)
-        self.nid_label.grid(row=1, column=1, padx=10, pady=5, sticky="w")
+        # --- Uplink Status ---
+        uplink_frame = ttk.LabelFrame(master, text="Uplink")
+        uplink_frame.pack(fill="x", padx=10, pady=5)
+        
+        self.uplink_status_label = ttk.Label(uplink_frame, text="Status: Desconectado", foreground="red")
+        self.uplink_status_label.pack(anchor="w", padx=5)
+        
+        self.uplink_addr_label = ttk.Label(uplink_frame, text="MAC: N/A")
+        self.uplink_addr_label.pack(anchor="w", padx=5)
 
-        # --- Status do Uplink ---
-        ttk.Label(master, text="Status do Uplink:", font=("Arial", 10, "bold")).grid(row=2, column=0, padx=10, pady=5, sticky="w")
-        self.status_label = ttk.Label(master, text=mock_uplink_status, foreground=mock_status_color)
-        self.status_label.grid(row=2, column=1, padx=10, pady=5, sticky="w")
+        # --- Downlinks & Routing ---
+        routing_frame = ttk.LabelFrame(master, text="Roteamento & Vizinhos")
+        routing_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        ttk.Label(routing_frame, text="Downlinks Conectados:", style="Header.TLabel").pack(anchor="w", padx=5)
+        self.downlinks_text = tk.Text(routing_frame, height=4, width=40)
+        self.downlinks_text.pack(padx=5, pady=2)
+        
+        ttk.Label(routing_frame, text="Tabela de Forwarding:", style="Header.TLabel").pack(anchor="w", padx=5)
+        self.forwarding_text = tk.Text(routing_frame, height=6, width=40)
+        self.forwarding_text.pack(padx=5, pady=2)
 
-        # --- NID do Uplink ---
-        ttk.Label(master, text="NID do Uplink:", font=("Arial", 10, "bold")).grid(row=3, column=0, padx=10, pady=5, sticky="w")
-        self.uplink_nid_label = ttk.Label(master, text=mock_uplink_nid)
-        self.uplink_nid_label.grid(row=3, column=1, padx=10, pady=5, sticky="w")
+        # --- Controles ---
+        controls_frame = ttk.LabelFrame(master, text="Ações de Rede")
+        controls_frame.pack(fill="x", padx=10, pady=10)
+        
+        ttk.Button(controls_frame, text="Scan & Connect Uplink", command=self.action_scan).pack(side="left", padx=5, pady=5)
+        ttk.Button(controls_frame, text="Disconnect Uplink", command=self.action_disconnect).pack(side="left", padx=5, pady=5)
+        ttk.Button(controls_frame, text="Broadcast Test", command=self.action_broadcast).pack(side="left", padx=5, pady=5)
 
-        # Inicia a função de atualização de 1 em 1 segundo (simulação)
+        # Inicia loop de atualização
         self.update_ui()
 
     def update_ui(self):
-        """
-        Função chamada periodicamente para atualizar o estado da UI.
-        Em produção, esta função leria o estado das variáveis de rede.
-        """
-        # AQUI: Lógica real leria as variáveis globais ou de uma classe de roteamento
-        self.status_label.config(text=mock_uplink_status, foreground=mock_status_color)
-        self.uplink_nid_label.config(text=mock_uplink_nid)
+        # Update Hop Count
+        hc = self.ble_manager.hop_count
+        self.hop_label.config(text=f"Hop Count: {hc}")
         
-        # Agenda a próxima atualização (1000ms = 1 segundo)
+        # Update Uplink
+        uplink = self.ble_manager.uplink_addr
+        if uplink:
+            self.uplink_status_label.config(text="Status: Conectado", foreground="green")
+            self.uplink_addr_label.config(text=f"MAC: {uplink}")
+        else:
+            self.uplink_status_label.config(text="Status: Desconectado", foreground="red")
+            self.uplink_addr_label.config(text="MAC: N/A")
+            
+        # Update Downlinks
+        downlinks = list(self.router.downlink_connections) # Set to list
+        self.downlinks_text.delete(1.0, tk.END)
+        for d in downlinks:
+            self.downlinks_text.insert(tk.END, f"{d}\n")
+            
+        # Update Forwarding Table
+        ft = self.router.forwarding_table # Dict {nid: via_mac}
+        self.forwarding_text.delete(1.0, tk.END)
+        for dest_nid, via_mac in ft.items():
+            # Truncate NID for display
+            short_nid = dest_nid[:8] + "..." if isinstance(dest_nid, str) else str(dest_nid)[:8]
+            self.forwarding_text.insert(tk.END, f"{short_nid} -> {via_mac}\n")
+
         self.master.after(1000, self.update_ui)
 
-# --- SIMULAÇÃO DE MUDANÇA DE ESTADO (PARA DEMONSTRAÇÃO) ---
-# Esta função simula o que aconteceria se a rede encontrasse um uplink.
-def simulate_network_change():
-    """Simula a conexão a um uplink após 5 segundos."""
-    global mock_uplink_status, mock_uplink_nid, mock_status_color
-    
-    time.sleep(5) # Espera 5 segundos
-    
-    # Simula a conexão bem-sucedida
-    new_uplink_nid = "2F4E6D8B0A1C3E579F2D4B6A8C0E1F35"
-    print(f"\n[SIMULAÇÃO] Uplink encontrado: {new_uplink_nid}")
-    
-    mock_uplink_status = "Conectado"
-    mock_uplink_nid = new_uplink_nid
-    mock_status_color = STATUS_COLOR_CONNECTED
+    def action_scan(self):
+        def run_scan():
+            self.master.title("Scanning...")
+            success = self.ble_manager.find_and_connect_uplink()
+            if success:
+                messagebox.showinfo("Scan", "Uplink conectado!")
+            else:
+                messagebox.showwarning("Scan", "Nenhum Uplink adequado encontrado.")
+            self.master.title(f"SIC Node: {self.node_nid[:4]}...")
 
-# --- EXECUÇÃO ---
+        threading.Thread(target=run_scan, daemon=True).start()
+
+    def action_disconnect(self):
+        if self.ble_manager.uplink_addr:
+            self.ble_manager.trigger_chain_disconnection()
+            messagebox.showinfo("Disconnect", "Desconectado do Uplink.")
+        else:
+            messagebox.showinfo("Disconnect", "Já está desconectado.")
+
+    def action_broadcast(self):
+        # Send a dummy packet to all
+        msg = b"TEST_BROADCAST"
+        count = self.ble_manager.send_to_all_links(msg)
+        messagebox.showinfo("Broadcast", f"Enviado para {count} links.")
+
 if __name__ == "__main__":
-    # Inicia a thread de simulação em segundo plano
-    import threading
-    threading.Thread(target=simulate_network_change, daemon=True).start()
-    
-    # Inicia a interface gráfica
+    # Mock testing
     root = tk.Tk()
-    app = IoTNodeUI(root)
+    tk.Label(root, text="Execute main.py para usar a UI completa").pack()
     root.mainloop()

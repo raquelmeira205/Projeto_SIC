@@ -31,10 +31,27 @@ def scan_nearby_devices(duration=5):
 
     print(f"[*] A iniciar scan simplepyble por {duration}s...")
     
-    # Ensure any previous scan is stopped (though scan_for handles this often)
-    # adapter.scan_stop() 
+    # Ensure any previous scan is stopped to avoid "Operation already in progress"
+    try:
+        adapter.scan_stop()
+    except Exception:
+        pass # Ignore if not scanning
     
-    adapter.scan_for(duration * 1000) # millseconds
+    try:
+        adapter.scan_for(duration * 1000) # millseconds
+    except RuntimeError as e:
+        if "inprogress" in str(e).lower() or "in progress" in str(e).lower():
+            print("[!] Scan already in progress. Attempting to stop and retry...")
+            try:
+                adapter.scan_stop()
+                time.sleep(1)
+                adapter.scan_for(duration * 1000)
+            except Exception as e2:
+                print(f"[!] Failed to retry scan: {e2}")
+                return []
+        else:
+            print(f"[!] Critical error during scan: {e}")
+            return []
     
     peripherals = adapter.scan_get_results()
     

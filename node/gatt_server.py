@@ -228,18 +228,6 @@ class IoTAvertisement(dbus.service.Object):
         return self.get_properties()[LE_ADVERTISEMENT_IFACE]
 
 
-def register_ad_cb():
-    print("[Adv] Advertisement registered")
-
-def register_ad_error_cb(error):
-    print("[Adv] Failed to register advertisement: " + str(error))
-    
-def register_app_cb():
-    print("[GATT] GATT application registered")
-
-def register_app_error_cb(error):
-    print("[GATT] Failed to register application: " + str(error))
-
 class NodeGATTServer:
     def __init__(self, packet_handler_callback):
         self.bus = dbus.SystemBus()
@@ -265,28 +253,61 @@ class NodeGATTServer:
     def send_notification(self, data):
         self.rx_char.send_notification(data)
 
-    def start(self):
-        # Register Application
-        service_manager = dbus.Interface(
-            self.bus.get_object(BLUEZ_SERVICE_NAME, "/org/bluez/hci0"),
-            GATT_MANAGER_IFACE)
-        service_manager.RegisterApplication(
-            self.app.get_path(), {},
-            reply_handler=register_app_cb,
-            error_handler=register_app_error_cb
-        )
+    def register_ad_cb(self):
+        print("[Adv] Advertisement registered")
+        self.adv_retry_count = 0
 
+    def register_ad_error_cb(self, error):
+        print("[Adv] Failed to register advertisement: " + str(error))
+        if self.adv_retry_count < 3:
+            self.adv_retry_count += 1
+            print(f"[Adv] Retrying registration ({self.adv_retry_count}/3)...")
+            import time
+            time.sleep(2)
+            self._register_adv()
+        else:
+            print("[Adv] Giving up on advertisement registration.")
+
+    def register_app_cb(self):
+        print("[GATT] GATT application registered")
+
+    def register_app_error_cb(self, error):
+        print("[GATT] Failed to register application: " + str(error))
+
+    def start(self):
+        self.adv_retry_count = 0
+        self._register_app()
+        self._register_adv()
+
+    def _register_app(self):
+        # Register Application
+        try:
+            service_manager = dbus.Interface(
+                self.bus.get_object(BLUEZ_SERVICE_NAME, "/org/bluez/hci0"),
+                GATT_MANAGER_IFACE)
+            service_manager.RegisterApplication(
+                self.app.get_path(), {},
+                reply_handler=self.register_app_cb,
+                error_handler=self.register_app_error_cb
+            )
+        except Exception as e:
+            print(f"[GATT] Error accessing GattManager: {e}")
+
+    def _register_adv(self):
         # Register Advertisement
-        ad_manager = dbus.Interface(
-            self.bus.get_object(BLUEZ_SERVICE_NAME, "/org/bluez/hci0"),
-            LE_ADVERTISING_MANAGER_IFACE)
-            
-        print("[Adv] Registering advertisement...")
-        ad_manager.RegisterAdvertisement(
-            self.advertisement.get_path(), {},
-            reply_handler=register_ad_cb,
-            error_handler=register_ad_error_cb
-        )
+        try:
+            ad_manager = dbus.Interface(
+                self.bus.get_object(BLUEZ_SERVICE_NAME, "/org/bluez/hci0"),
+                LE_ADVERTISING_MANAGER_IFACE)
+                
+            print("[Adv] Registering advertisement...")
+            ad_manager.RegisterAdvertisement(
+                self.advertisement.get_path(), {},
+                reply_handler=self.register_ad_cb,
+                error_handler=self.register_ad_error_cb
+            )
+        except Exception as e:
+             print(f"[Adv] Error accessing LEAdvertisingManager: {e}")
 
     def update_hop_count(self, hop_count):
         print(f"[Adv] Updating Hop Count to {hop_count}")
@@ -296,13 +317,4 @@ class NodeGATTServer:
         # A trigger to 'PropertiesChanged' signal might be needed.
         
         self.advertisement.set_hop_count(hop_count)
-        
-        # HACK: Force re-registration or signal change?
-        # Standard DBus PropertiesChanged signal
-        # self.advertisement.PropertiesChanged(LE_ADVERTISEMENT_IFACE, 
-        #   { "ManufacturerData": self.advertisement.manufacturer_data }, [])
-        
-        # Since implementing PropertiesChanged manually is verbose, 
-        # let's try to just let it be invalid until re-registered or rely on BlueZ polling.
-        # Ideally: Unregister -> Update -> Register.
         pass

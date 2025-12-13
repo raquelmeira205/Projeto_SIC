@@ -20,52 +20,54 @@ GATT_DESC_IFACE = 'org.bluez.GattDescriptor1'
 
 BLUEZ_SERVICE_NAME = 'org.bluez'
 
+from gi.repository import GLib
+
+BLUEZ_SERVICE_NAME = 'org.bluez'
+LE_ADVERTISEMENT_IFACE = 'org.bluez.LEAdvertisement1'
+
+
 class Advertisement(object):
     """
-    Encapsula o objeto org.bluez.LEAdvertisement1.
+    BlueZ LEAdvertisement1 (pydbus compatible, spec-correct)
     """
     dbus = f"""
     <node>
         <interface name="{LE_ADVERTISEMENT_IFACE}">
-            <method name="Release">
-                <annotation name="org.freedesktop.DBus.Method.NoReply" value="true"/>
-            </method>
+            <method name="Release"/>
             <property name="Type" type="s" access="read"/>
             <property name="ServiceUUIDs" type="as" access="read"/>
             <property name="ManufacturerData" type="a{{qv}}" access="read"/>
             <property name="SolicitUUIDs" type="as" access="read"/>
             <property name="ServiceData" type="a{{sv}}" access="read"/>
-            <property name="IncludeTxPower" type="b" access="read"/>
             <property name="LocalName" type="s" access="read"/>
             <property name="Appearance" type="q" access="read"/>
+            <property name="Includes" type="as" access="read"/>
         </interface>
     </node>
     """
 
-    def __init__(self, bus, index, advertising_type):
-        self.path = '/org/bluez/example/advertisement' + str(index)
+    def __init__(self, bus, index, advertising_type="peripheral"):
         self.bus = bus
+        self.path = f"/org/bluez/example/advertisement{index}"
+
         self.ad_type = advertising_type
         self.service_uuids = []
         self.manufacturer_data = {}
         self.solicit_uuids = []
         self.service_data = {}
-        self.include_tx_power = False
+
         self.local_name = None
-        self.appearance = 0
-        
+        self.appearance = None
+        self.include_tx_power = False
+
+        self.registration = None
+
+    # ---------------------------------------------------------------------
+    # Helpers
+    # ---------------------------------------------------------------------
+
     def get_path(self):
         return self.path
-        
-    def add_manufacturer_data(self, manuf_id, data):
-        # pydbus expects variants, but usually automatic. 
-        # data should be bytes or list of bytes.
-        
-        # Ensure it is bytes
-        if isinstance(data, list):
-            data = bytes(data)
-            
-        self.manufacturer_data[manuf_id] = GLib.Variant('ay', data)
 
     def add_service_uuid(self, uuid):
         self.service_uuids.append(uuid)
@@ -73,7 +75,20 @@ class Advertisement(object):
     def add_local_name(self, name):
         self.local_name = name
 
-    # Properties
+    def add_manufacturer_data(self, company_id, data):
+        if isinstance(data, list):
+            data = bytes(data)
+        self.manufacturer_data[company_id] = GLib.Variant('ay', data)
+
+    def add_service_data(self, uuid, data):
+        if isinstance(data, list):
+            data = bytes(data)
+        self.service_data[uuid] = GLib.Variant('ay', data)
+
+    # ---------------------------------------------------------------------
+    # DBus properties (exact BlueZ spec)
+    # ---------------------------------------------------------------------
+
     @property
     def Type(self):
         return self.ad_type
@@ -95,55 +110,52 @@ class Advertisement(object):
         return self.service_data
 
     @property
-    def IncludeTxPower(self):
-        return self.include_tx_power
-        
-    @property
     def LocalName(self):
-        if self.local_name:
-            return self.local_name
-        return ""
-        
+        return self.local_name or ""
+
     @property
     def Appearance(self):
-        return self.appearance
+        return self.appearance if self.appearance is not None else 0
+
+    @property
+    def Includes(self):
+        return ["tx-power"] if self.include_tx_power else []
+
+    # ---------------------------------------------------------------------
+    # Lifecycle
+    # ---------------------------------------------------------------------
 
     def Release(self):
-        print(f'{self.path}: Released!')
+        print(f"{self.path}: Released by BlueZ")
 
-    def register(self):
-        adapter = self.bus.get(BLUEZ_SERVICE_NAME, ADAPTER_PATH)
-        manager = self.bus.get(BLUEZ_SERVICE_NAME, ADAPTER_PATH) 
-        # Note: In standard BlueZ, LEAdvertisingManager1 is on the adapter path
-        # Assuming hci0.
-        
-        # Publish this object to DBus (Export without name ownership)
-        self.registration = self.bus.register_object(self.path, self, None)
-        
-        print(f'Registering advertisement at {self.path}...')
-        # Call RegisterAdvertisement on the adapter interface org.bluez.LEAdvertisingManager1
-        # Use pydbus dynamic proxy which should expose RegisterAdvertisement
+    def register(self, adapter_path):
+        # Ensure adapter is powered
+        props = self.bus.get(BLUEZ_SERVICE_NAME, adapter_path)['org.freedesktop.DBus.Properties']
+        props.Set('org.bluez.Adapter1', 'Powered', GLib.Variant('b', True))
+
+        # Export object
+        self.registration = self.bus.register_object(
+            self.path,
+            self,
+            self.dbus      # <-- REQUIRED
+        )
+
+        print(f"Registering advertisement at {self.path}")
+        lem = self.bus.get(BLUEZ_SERVICE_NAME, adapter_path)['org.bluez.LEAdvertisingManager1']
+        lem.RegisterAdvertisement(self.path, {})
+
+        print("Advertisement registered")
+
+    def unregister(self, adapter_path):
         try:
-             # Interface might be accessed slightly differently depending on pydbus version/system
-             # But usually accessing the object allows calling methods.
-             # We need to ensure we call it on the right interface.
-             # adapter object should have 'RegisterAdvertisement' if it has the interface.
-             lem = self.bus.get(BLUEZ_SERVICE_NAME, ADAPTER_PATH)['org.bluez.LEAdvertisingManager1']
-             lem.RegisterAdvertisement(self.path, {})
-             print('Advertisement registered.')
-        except Exception as e:
-            print(f'Failed to register advertisement: {e}')
-            self.registration.unregister()
+            lem = self.bus.get(BLUEZ_SERVICE_NAME, adapter_path)['org.bluez.LEAdvertisingManager1']
+            lem.UnregisterAdvertisement(self.path)
+        finally:
+            if self.registration:
+                self.registration.unregister()
+                self.registration = None
+            print("Advertisement unregistered")
 
-    def unregister(self):
-         try:
-             lem = self.bus.get(BLUEZ_SERVICE_NAME, ADAPTER_PATH)['org.bluez.LEAdvertisingManager1']
-             lem.UnregisterAdvertisement(self.path)
-             if hasattr(self, 'registration'):
-                 self.registration.unregister()
-             print('Advertisement unregistered.')
-         except Exception as e:
-             print(f"Error unregistering advertisement: {e}")
 
 
 class Service(object):

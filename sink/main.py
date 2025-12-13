@@ -14,6 +14,8 @@ from common.ble_utils import BUS, SIC_SERVICE_UUID, SIC_RX_CHAR_UUID, get_device
 from common.pki_utils import read_nid_from_cert
 from sink.heartbeat_service import HeartbeatService
 
+ADAPTER_PATH = "/org/bluez/hci0"
+
 # UUIDs
 
 class MockSecurity:
@@ -28,15 +30,23 @@ class SinkConnectionManager:
 
     def start_advertising(self):
         print("[Sink] A iniciar Advertisement (Hop Count=0)...")
-        self.advertisement = Advertisement(self.bus, 0, 'peripheral')
-        # self.advertisement.add_local_name("SIC-Sink")
-        # self.advertisement.add_service_uuid(SIC_SERVICE_UUID)
-        
-        # Manuf Data: [0 (Hop Count)] + [NID]
-        manuf_payload = [0] + list(self.sink_nid)
+
+        self.advertisement = Advertisement(
+            self.bus,
+            index=0,
+            advertising_type='peripheral'
+        )
+
+        # Optional but useful for debugging
+        self.advertisement.add_local_name("SIC-Sink")
+
+        # Manufacturer Data:
+        # [ hop_count (1 byte) | sink_nid (N bytes) ]
+        manuf_payload = bytes([0]) + self.sink_nid
         self.advertisement.add_manufacturer_data(0xFFFE, manuf_payload)
-        
-        self.advertisement.register()
+
+        # REQUIRED FIX
+        self.advertisement.register(ADAPTER_PATH)
 
     def send_to_all_links(self, packet):
         # Enviar para todos os dispositivos conectados que exponham o serviço SIC

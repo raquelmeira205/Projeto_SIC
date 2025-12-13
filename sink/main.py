@@ -29,8 +29,8 @@ class SinkConnectionManager:
     def start_advertising(self):
         print("[Sink] A iniciar Advertisement (Hop Count=0)...")
         self.advertisement = Advertisement(self.bus, 0, 'peripheral')
-        self.advertisement.add_local_name("SIC-Sink")
-        self.advertisement.add_service_uuid(SIC_SERVICE_UUID)
+        # self.advertisement.add_local_name("SIC-Sink")
+        # self.advertisement.add_service_uuid(SIC_SERVICE_UUID)
         
         # Manuf Data: [0 (Hop Count)] + [NID]
         manuf_payload = [0] + list(self.sink_nid)

@@ -33,11 +33,11 @@ class BLEManager:
         self.advertisement = Advertisement(BUS, 0, 'peripheral')
         
         # Nome local: "Node-<4 bytes do NID>"
-        local_name = f"Node-{self.node_nid[-4:].hex()}"
-        self.advertisement.add_local_name(local_name)
+        # local_name = f"Node-{self.node_nid[-4:].hex()}"
+        # self.advertisement.add_local_name(local_name)
         
         # Adicionar UUID do serviço principal para que os outros saibam que somos um nó SIC
-        self.advertisement.add_service_uuid(SIC_SERVICE_UUID)
+        # self.advertisement.add_service_uuid(SIC_SERVICE_UUID)
         
         # Manufacturer Data: [Hop Count (1 byte)] + [NID (16 bytes)]
         # Se hop_count for -1, enviamos 255 (0xFF)

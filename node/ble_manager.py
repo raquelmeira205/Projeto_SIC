@@ -1,5 +1,7 @@
 import time
-from common.ble_utils import get_device_object, scan_nearby_devices
+from gi.repository import GLib
+from common.ble_utils import get_device_object, scan_nearby_devices, BUS, SIC_RX_CHAR_UUID, get_gatt_characteristic, SIC_SERVICE_UUID
+from common.bluez_classes import Advertisement
 
 class BLEManager:
    
@@ -12,7 +14,82 @@ class BLEManager:
         # Tabela de Encaminhamento (para o futuro: NID -> mac_addr do próximo hop)
         self.forwarding_table = {} 
         # O estado inicial do hop count é negativo, indicando que não está ligado ao Sink
+        # O estado inicial do hop count é negativo, indicando que não está ligado ao Sink
         self.hop_count = -1 
+        self.advertisement = None
+        self.router_callback_connect = None
+        self.router_callback_disconnect = None
+
+    def set_router_callbacks(self, on_connect, on_disconnect):
+        self.router_callback_connect = on_connect
+        self.router_callback_disconnect = on_disconnect
+
+    def start_advertising(self):
+        if self.advertisement:
+            return # Já está a anunciar
+            
+        print(f"[*] A iniciar Advertisement (Hop Count={self.hop_count})...")
+        # Criar instância de Advertisement (type='peripheral')
+        self.advertisement = Advertisement(BUS, 0, 'peripheral')
+        
+        # Nome local: "Node-<4 bytes do NID>"
+        local_name = f"Node-{self.node_nid[-4:].hex()}"
+        self.advertisement.add_local_name(local_name)
+        
+        # Adicionar UUID do serviço principal para que os outros saibam que somos um nó SIC
+        self.advertisement.add_service_uuid(SIC_SERVICE_UUID)
+        
+        # Manufacturer Data: [Hop Count (1 byte)] + [NID (16 bytes)]
+        # Se hop_count for -1, enviamos 255 (0xFF)
+        hc_val = self.hop_count if self.hop_count >= 0 else 0xFF
+        
+        # Criar payload
+        manuf_payload = [hc_val] + list(self.node_nid)
+        self.advertisement.add_manufacturer_data(0xFFFE, manuf_payload)
+        
+        try:
+            self.advertisement.register()
+        except Exception as e:
+            print(f"[!] Falha ao registar Advertisement: {e}")
+            self.advertisement = None
+
+    def update_advertisement(self):
+        """Atualiza os dados de manufatura (ex: hop count mudou)."""
+        if self.advertisement:
+            print("[*] A atualizar Advertisement com novo Hop Count...")
+            self.advertisement.unregister()
+            self.advertisement = None
+            
+        self.start_advertising()
+
+    def send_packet(self, dest_mac, packet_data):
+        """Envia pacote via GATT Write no destinatário."""
+        device = get_device_object(dest_mac)
+        
+        # 1. Garantir conexão
+        if not device or not device.Connected:
+            if not self.connect_to_device(dest_mac):
+                return False
+                
+        # 2. Obter a Característica RX do destino
+        char_proxy = get_gatt_characteristic(dest_mac, SIC_RX_CHAR_UUID)
+        if not char_proxy:
+            print(f"[!] Não foi possível encontrar a característica RX em {dest_mac}")
+            return False
+            
+        # 3. Escrever (WriteValue)
+        try:
+            # WriteValue(value, options). Value deve ser bytes.
+            # pydbus/bluez requerem, por vezes, array de bytes. O proxy do pydbus lida com conversão base, 
+            # mas 'ay' DBus type mapeia para bytes em Python 3.
+            char_proxy.WriteValue(packet_data, {'type': GLib.Variant('s', 'command')}) 
+            # Note: 'type': 'command' -> Write Without Response, 'request' -> Write With Response.
+            # Se quisermos garantia, usamos 'request'. Padrão é 'request' se omitido geralmente, mas depende da char properties.
+            # Vou assumir default options {} que é WriteWithResponse se suportado.
+            return True
+        except Exception as e:
+            print(f"[!] Erro ao enviar pacote para {dest_mac}: {e}")
+            return False
 
     def connect_to_device(self, mac_address):
         
@@ -32,6 +109,10 @@ class BLEManager:
             print(f"[!] Falha na conexão com {mac_address}: {e}")
             return False
 
+    def disconnect(self, mac_address):
+        """Alias compatível com router.py"""
+        return self.disconnect_from_device(mac_address)
+
     def disconnect_from_device(self, mac_address):
     
         device = get_device_object(mac_address)
@@ -43,6 +124,15 @@ class BLEManager:
             print(f"[*] A tentar desconectar de {mac_address}...")
             device.Disconnect()
             print(f"[-] Desconectado com sucesso de {mac_address}.")
+            
+            # Se desconectámos o uplink explicitamente (ou pedido pelo router)
+            if mac_address == self.uplink_addr:
+                 self.trigger_chain_disconnection()
+            
+            # Notificar router se necessário
+            if self.router_callback_disconnect:
+                self.router_callback_disconnect(mac_address)
+                
             return True
         except Exception as e:
             print(f"[!] Falha na desconexão com {mac_address}: {e}")
@@ -101,6 +191,14 @@ class BLEManager:
             self.uplink_addr = chosen_uplink_addr
             print(f"[+] Uplink estabelecido com {self.uplink_addr}.")
             print(f"[#] Meu novo Hop Count é: {self.hop_count}")
+            
+            # Atualizar advertisement para refletir novo hop count
+            self.update_advertisement()
+            
+            # Notificar Router
+            if self.router_callback_connect:
+                self.router_callback_connect(self.uplink_addr, best_uplink['hop_count'])
+                
             return True
         
         print("[!] Não foi possível estabelecer um uplink com o nó otimizado.")

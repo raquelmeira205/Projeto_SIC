@@ -24,8 +24,9 @@ class IoTNodeUI:
     Boilerplate da Interface de Utilizador para o dispositivo IoT (Node).
     Exibe o NID do dispositivo e o status do Uplink.
     """
-    def __init__(self, master):
+    def __init__(self, master, node_ref=None):
         self.master = master
+        self.node_ref = node_ref
         master.title("SIC IoT Node UI")
 
         # Configuração básica de estilos
@@ -37,8 +38,9 @@ class IoTNodeUI:
         self.title_label.grid(row=0, column=0, columnspan=2, pady=10)
 
         # --- NID do Dispositivo ---
+        nid_text = self.node_ref.node_nid.hex() if self.node_ref else MOCK_DEVICE_NID
         ttk.Label(master, text="NID do Dispositivo:", font=("Arial", 10, "bold")).grid(row=1, column=0, padx=10, pady=5, sticky="w")
-        self.nid_label = ttk.Label(master, text=MOCK_DEVICE_NID)
+        self.nid_label = ttk.Label(master, text=nid_text)
         self.nid_label.grid(row=1, column=1, padx=10, pady=5, sticky="w")
 
         # --- Status do Uplink ---
@@ -57,11 +59,26 @@ class IoTNodeUI:
     def update_ui(self):
         """
         Função chamada periodicamente para atualizar o estado da UI.
-        Em produção, esta função leria o estado das variáveis de rede.
         """
-        # AQUI: Lógica real leria as variáveis globais ou de uma classe de roteamento
-        self.status_label.config(text=mock_uplink_status, foreground=mock_status_color)
-        self.uplink_nid_label.config(text=mock_uplink_nid)
+        if self.node_ref:
+            # Ler dados reais
+            uplink = self.node_ref.ble_manager.uplink_addr
+            if uplink:
+                status_text = "Conectado"
+                status_color = "green"
+                uplink_text = uplink # Deveria ser NID, mas usamos MAC por enquanto
+            else:
+                status_text = "Desconectado"
+                status_color = "red"
+                uplink_text = "N/A"
+        else:
+            # Mockup
+            status_text = mock_uplink_status
+            status_color = mock_status_color
+            uplink_text = mock_uplink_nid
+
+        self.status_label.config(text=status_text, foreground=status_color)
+        self.uplink_nid_label.config(text=uplink_text)
         
         # Agenda a próxima atualização (1000ms = 1 segundo)
         self.master.after(1000, self.update_ui)

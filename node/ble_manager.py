@@ -135,6 +135,8 @@ class BLEManager:
         print(f"[*] Melhor Uplink escolhido: {best_uplink['name']} ({chosen_uplink_addr})")
         print(f"    Métricas: Hop Count = {best_uplink['hop_count']}, RSSI = {best_uplink['rssi']} dBm")
 
+        if self.connect_to_device(chosen_uplink_addr):
+            self.uplink_addr = chosen_uplink_addr
             print(f"[+] Uplink estabelecido com {self.uplink_addr}.")
             # Update local Hop Count 
             self.hop_count = best_uplink['hop_count'] + 1

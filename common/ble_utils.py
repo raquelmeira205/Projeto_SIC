@@ -44,17 +44,11 @@ def scan_nearby_devices(duration=5):
             print("[!] Scan already in progress. Attempting to stop and retry...")
             try:
                 adapter.scan_stop()
-            except Exception as e_stop:
-                # If stopping failed because it wasn't running, that's fine, we can proceed.
-                if "no discovery started" not in str(e_stop).lower():
-                     print(f"[!] Warning: scan_stop failed: {e_stop}")
-            
-            time.sleep(1)
-            try:
+                time.sleep(1)
                 adapter.scan_for(duration * 1000)
             except Exception as e2:
-                 print(f"[!] Failed to retry scan: {e2}")
-                 return []
+                print(f"[!] Failed to retry scan: {e2}")
+                return []
         else:
             print(f"[!] Critical error during scan: {e}")
             return []

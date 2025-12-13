@@ -107,18 +107,21 @@ def scan_nearby_devices(duration=10):
 
                     CUSTOM_ADV_ID = 0xFFFE
 
+                    nid = None
                     if CUSTOM_ADV_ID in manufacturer_data:
                         adv_data = manufacturer_data[CUSTOM_ADV_ID]
                         # o primeiro byte é o hop count
-                        if len(adv_data) > 0:
+                        if len(adv_data) > 1:
                             hop_count = adv_data[0]
+                            nid = bytes(adv_data[1:])
                     
                     # Lógica de atualização: Se é novo ou se o sinal melhorou
                     if mac not in discovered_devices_metrics or rssi > discovered_devices_metrics[mac]['rssi']:
                         discovered_devices_metrics[mac] = {
                             "name": name,
                             "hop_count": hop_count,
-                            "rssi": rssi
+                            "rssi": rssi,
+                            "nid": nid
                         }
 
             time.sleep(1)
@@ -127,7 +130,7 @@ def scan_nearby_devices(duration=10):
         adapter.StopDiscovery()
 
         return [
-            (mac, data['name'], data['hop_count'], data['rssi'])
+            (mac, data['name'], data['hop_count'], data['rssi'], data['nid'])
             for mac, data in discovered_devices_metrics.items()
         ]
 

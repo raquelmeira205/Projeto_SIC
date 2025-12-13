@@ -15,6 +15,7 @@ class BLEManager:
         self.node_nid = node_nid
 
         self.uplink_addr = None
+        self.uplink_nid = None
         self.downlinks = {}
         self.forwarding_table = {}
 
@@ -145,12 +146,13 @@ class BLEManager:
 
         # menor hop, melhor RSSI
         best = min(candidates, key=lambda d: (d[2], -d[3]))
-        mac, name, hop, rssi = best
+        mac, name, hop, rssi, nid = best
 
         print(f"[*] Uplink escolhido: {name} {mac} (hop={hop}, rssi={rssi})")
 
         if self.connect_to_device(mac):
             self.uplink_addr = mac
+            self.uplink_nid = nid # Store NID
             self.hop_count = hop + 1
             self.update_advertisement()
 
@@ -169,6 +171,7 @@ class BLEManager:
         print("[!!!] Perda de uplink")
 
         self.uplink_addr = None
+        self.uplink_nid = None
         self.hop_count = -1
 
         for mac in list(self.downlinks.keys()):

@@ -46,6 +46,19 @@ class NodeApplication(Application):
 
         char = RxCharacteristic(bus, 0, service, router)
         service.add_characteristic(char)
+        
+        self.router = router
+
+    def receive(self, src_nid, payload):
+        print(f"[App] Recebido de {src_nid.hex()}: {payload}")
+        # Store in router stats for UI (or Node)
+        # Assuming payload is text bytes
+        try:
+            msg_text = payload.decode('utf-8')
+        except:
+             msg_text = payload.hex()
+             
+        self.router.stats["received_messages"].append((src_nid.hex(), msg_text))
 
 
 class Node:
@@ -65,6 +78,7 @@ class Node:
         )
 
         self.app = NodeApplication(BUS, self.router)
+        self.router.app_layer = self.app # Link app layer
         self.app.register()
 
         time.sleep(0.5)
@@ -85,6 +99,13 @@ class Node:
                 self.ble_manager.find_and_connect_uplink()
 
             time.sleep(10)
+
+    def send_to_sink(self, text):
+        if not self.router.sink_nid:
+            print("[!] Sink NID desconhecido")
+            return False
+            
+        return self.router.send_app_data(self.router.sink_nid, text.encode('utf-8'))
 
 
 def main():

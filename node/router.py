@@ -22,12 +22,26 @@ class Router:
         self.hops_to_sink = -1
 
         self._stop_monitor = False
+        
+        # Stats & UI Support
+        self.sink_nid = None
+        self.stats = {
+            "lost_heartbeats": 0,
+            "routed_messages": 0,
+            "received_messages": [] # List of (sender_nid, msg_bytes)
+        }
+
         threading.Thread(target=self._monitor_heartbeat_timeout, daemon=True).start()
 
     def set_uplink(self, connection_handle, hops):
         self.uplink_connection = connection_handle
         self.hops_to_sink = hops + 1
         self.last_heartbeat_time = time.time()
+
+    def send_app_data(self, dest_nid, payload):
+        packet = PacketHeader.pack(self.my_nid, dest_nid, MsgType.DATA, payload)
+        self._route_data(self.my_nid, dest_nid, payload, packet)
+        return True
 
     def process_incoming_packet(self, packet_data, incoming_conn):
         try:
@@ -38,16 +52,20 @@ class Router:
                     self.forwarding_table[src] = incoming_conn
 
             if mtype == MsgType.HEARTBEAT:
-                self._handle_heartbeat(payload, incoming_conn)
+                self._handle_heartbeat(payload, incoming_conn, src)
             elif mtype == MsgType.DATA:
                 self._route_data(src, dest, payload, packet_data)
 
         except Exception as e:
             print(f"Packet Error: {e}")
 
-    def _handle_heartbeat(self, payload, incoming_conn):
+    def _handle_heartbeat(self, payload, incoming_conn, src_nid):
         if incoming_conn != self.uplink_connection:
             return
+
+        # Capturar Sink NID
+        if self.sink_nid != src_nid:
+             self.sink_nid = src_nid
 
         seq, sig = HeartbeatPayload.unpack(payload)
 
@@ -69,6 +87,7 @@ class Router:
             time.sleep(1)
             if self.uplink_connection:
                 if (time.time() - self.last_heartbeat_time) > TIMEOUT_LIMIT:
+                    self.stats["lost_heartbeats"] += 1
                     self.ble.disconnect_from_device(self.uplink_connection) 
 
     def handle_disconnection(self, conn):
@@ -91,6 +110,8 @@ class Router:
         if dest == self.my_nid:
             if self.app_layer: self.app_layer.receive(src, payload)
         elif dest in self.forwarding_table:
+            self.stats["routed_messages"] += 1
             self.ble.send_packet(self.forwarding_table[dest], raw)
         elif self.uplink_connection:
+            self.stats["routed_messages"] += 1
             self.ble.send_packet(self.uplink_connection, raw)

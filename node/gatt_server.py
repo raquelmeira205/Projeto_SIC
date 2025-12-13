@@ -198,10 +198,10 @@ class IoTAvertisement(dbus.service.Object):
             val = self.hop_count
             if val < 0: val = 255
             
-            # m_data = dbus.Dictionary({
-            #    dbus.UInt16(MANUFACTURER_ID): dbus.Array([dbus.Byte(val)], signature="y")
-            # }, signature="qv")
-            # properties["ManufacturerData"] = m_data
+            m_data = dbus.Dictionary({
+                dbus.UInt16(MANUFACTURER_ID): dbus.Array([dbus.Byte(val)], signature="y")
+            }, signature="qv")
+            properties["ManufacturerData"] = m_data
             
         # properties["Includes"] = dbus.Array(["tx-power"], signature="s")
         

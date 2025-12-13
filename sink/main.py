@@ -65,10 +65,15 @@ def main():
         
         # Start Heartbeat (Threaded)
         heartbeat.start()
-
         
         # Start BLE Manager (GATT Server registration)
-        ble_manager.start()
+        try:
+            ble_manager.start()
+        except Exception as e:
+            print(f"[!] Erro ao iniciar servidor GATT: {e}")
+            print("[!] Verifique se o serviço Bluetooth está rodando: sudo systemctl start bluetooth")
+            heartbeat.stop()
+            return
 
         print("[*] Sink Running. Press Ctrl+C to stop.")
         loop.run()

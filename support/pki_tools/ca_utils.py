@@ -4,15 +4,15 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 import datetime
 
-def generate_key_pair():
+def gerar_par_chaves():
 
     # Gera uma chave ECC P-521
     return ec.generate_private_key(ec.SECP521R1())
 
-def create_ca(common_name="SIC Root CA"):
+def criar_ca(common_name="SIC Root CA"):
     
     # Cria uma CA autoassinada
-    private_key = generate_key_pair()
+    private_key = gerar_par_chaves()
     public_key = private_key.public_key()
 
     builder = (
@@ -29,9 +29,9 @@ def create_ca(common_name="SIC Root CA"):
     cert = builder.sign(private_key=private_key, algorithm=hashes.SHA512())
     return private_key, cert
 
-def issue_certificate(ca_private_key, ca_cert, subject_name, is_sink=False, nid=None):
+def emitir_certificado(ca_private_key, ca_cert, subject_name, is_sink=False, nid=None):
     # Emite um certificado assinado pela CA
-    private_key = generate_key_pair()
+    private_key = gerar_par_chaves()
     public_key = private_key.public_key()
 
     atributos = [x509.NameAttribute(NameOID.COMMON_NAME, subject_name)]
@@ -54,7 +54,7 @@ def issue_certificate(ca_private_key, ca_cert, subject_name, is_sink=False, nid=
     cert = builder.sign(private_key=ca_private_key, algorithm=hashes.SHA512())
     return private_key, cert
 
-def save_key(key, filename):
+def guardar_chave(key, filename):
     # Guarda chave privada em PEM
     with open(filename, "wb") as f:
         f.write(key.private_bytes(
@@ -63,7 +63,7 @@ def save_key(key, filename):
             encryption_algorithm=serialization.NoEncryption()
         ))
 
-def save_cert(cert, filename):
+def guardar_cert(cert, filename):
     # Guarda certificado em PEM
     with open(filename, "wb") as f:
         f.write(cert.public_bytes(serialization.Encoding.PEM))

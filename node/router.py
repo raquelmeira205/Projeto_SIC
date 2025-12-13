@@ -36,10 +36,6 @@ class Router:
             if incoming_conn and src != self.my_nid:
                 if self.forwarding_table.get(src) != incoming_conn:
                     self.forwarding_table[src] = incoming_conn
-                
-                # Track Downlinks: If it's not our uplink, it's a child/neighbor downlink
-                if incoming_conn != self.uplink_connection:
-                    self.downlink_connections.add(incoming_conn)
 
             if mtype == MsgType.HEARTBEAT:
                 self._handle_heartbeat(payload, incoming_conn)
@@ -65,10 +61,8 @@ class Router:
         self.last_heartbeat_time = time.time()
 
         fwd_packet = PacketHeader.pack(b'\x00'*16, b'\x00'*16, MsgType.HEARTBEAT, payload)
-        
-        # Single Broadcast call instead of iterating
-        self.ble.send_downstream(fwd_packet)
-
+        for child in self.downlink_connections:
+            self.ble.send_packet(child, fwd_packet)
 
     def _monitor_heartbeat_timeout(self):
         while not self._stop_monitor:

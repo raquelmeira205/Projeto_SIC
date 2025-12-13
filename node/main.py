@@ -83,12 +83,7 @@ def main():
 
     # 4. Start BLE Server
     # Must be called after DBus setup
-    try:
-        ble_manager.gatt_server.start()
-    except Exception as e:
-        print(f"[!] Erro ao iniciar servidor GATT: {e}")
-        print("[!] Verifique se o serviço Bluetooth está rodando: sudo systemctl start bluetooth")
-        sys.exit(1)
+    ble_manager.gatt_server.start()
     
     # 5. Start UI (Main Thread)
     print("[UI] Starting Interface...")

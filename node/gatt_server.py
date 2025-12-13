@@ -163,8 +163,8 @@ class IoTAvertisement(dbus.service.Object):
         self.hop_count = None
         self.solicit_uuids = None
         self.service_data = None
-        self.local_name = "Node" # Shortened name
-        self.include_tx_power = False # Disable TX Power to save bytes
+        self.local_name = "IoT-Node" 
+        self.include_tx_power = True
         dbus.service.Object.__init__(self, bus, self.path)
         
         # Default Hop Count = -1 (not connected)

@@ -106,9 +106,20 @@ class IoTNodeUI:
         # Menu
         menubar = tk.Menu(self.master)
         net_menu = tk.Menu(menubar, tearoff=0)
+        net_menu.add_command(label="Force Connect (MAC)", command=self.force_uplink)
+        net_menu.add_separator()
         net_menu.add_command(label="Reset Stats", command=self.reset_stats)
         menubar.add_cascade(label="Network Controls", menu=net_menu)
         self.master.config(menu=menubar)
+
+    def force_uplink(self):
+        mac = simpledialog.askstring("Force Connect", "Target MAC Address:")
+        if mac:
+            mac = mac.strip()
+            if self.node.force_connect(mac):
+                messagebox.showinfo("Success", f"Connected to {mac}")
+            else:
+                 messagebox.showerror("Error", f"Could not connect to {mac}")
 
     def update_ui(self):
         if not self.node:

@@ -107,6 +107,35 @@ class Node:
             
         return self.router.send_app_data(self.router.sink_nid, text.encode('utf-8'))
 
+    def force_connect(self, mac):
+        print(f"[*] Force Connect solicitado para {mac}")
+        
+        # 1. Disconnect current Uplink if exists
+        curr = self.ble_manager.uplink_addr
+        if curr:
+             print(f"[*] A desconectar do uplink atual: {curr}")
+             self.ble_manager.disconnect_from_device(curr)
+        
+        # 2. Attempt Connection
+        if self.ble_manager.connect_to_device(mac):
+             print(f"[*] Sucesso Conexão Forçada a {mac}")
+             
+             # 3. Manually set as Uplink
+             # We might not know NID or Hop Count yet.
+             # Hop Count = 255 (Unknown/High)
+             self.ble_manager.uplink_addr = mac
+             self.ble_manager.uplink_nid = b'\x00'*16 # Unknown
+             self.ble_manager.hop_count = 255
+             self.ble_manager.update_advertisement()
+             
+             # Notify Router
+             self.router.set_uplink(mac, 254) # results in local hop=255
+             
+             return True
+        else:
+             print(f"[!] Falha Conexão Forçada a {mac}")
+             return False
+
 
 def main():
     parser = argparse.ArgumentParser()

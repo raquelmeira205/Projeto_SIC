@@ -60,6 +60,11 @@ class Advertisement(object):
     def add_manufacturer_data(self, manuf_id, data):
         # pydbus expects variants, but usually automatic. 
         # data should be bytes or list of bytes.
+        
+        # Ensure it is bytes
+        if isinstance(data, list):
+            data = bytes(data)
+            
         self.manufacturer_data[manuf_id] = GLib.Variant('ay', data)
 
     def add_service_uuid(self, uuid):

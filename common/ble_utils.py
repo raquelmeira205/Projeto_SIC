@@ -90,6 +90,11 @@ def scan_nearby_devices(duration=10):
                     hop_count = -1 # Valor padrão, significa 'não conectado ao Sink'
 
                     manufacturer_data = device_props.get("ManufacturerData", {})
+                    
+                    # DEBUG: Print raw manufacturer data
+                    if manufacturer_data:
+                         print(f"       [DEBUG-MD] ManufData para {mac}: {manufacturer_data}")
+
                     CUSTOM_ADV_ID = 0xFFFE
 
                     if CUSTOM_ADV_ID in manufacturer_data:

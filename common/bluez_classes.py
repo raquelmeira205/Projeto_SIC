@@ -112,8 +112,8 @@ class Advertisement(object):
         # Note: In standard BlueZ, LEAdvertisingManager1 is on the adapter path
         # Assuming hci0.
         
-        # Publish this object to DBus
-        self.publication = self.bus.publish(self.path, self)
+        # Publish this object to DBus (Export without name ownership)
+        self.registration = self.bus.register_object(self.path, self, None)
         
         print(f'Registering advertisement at {self.path}...')
         # Call RegisterAdvertisement on the adapter interface org.bluez.LEAdvertisingManager1
@@ -128,14 +128,14 @@ class Advertisement(object):
              print('Advertisement registered.')
         except Exception as e:
             print(f'Failed to register advertisement: {e}')
-            self.publication.unpublish()
+            self.registration.unregister()
 
     def unregister(self):
          try:
              lem = self.bus.get(BLUEZ_SERVICE_NAME, ADAPTER_PATH)['org.bluez.LEAdvertisingManager1']
              lem.UnregisterAdvertisement(self.path)
-             if hasattr(self, 'publication'):
-                 self.publication.unpublish()
+             if hasattr(self, 'registration'):
+                 self.registration.unregister()
              print('Advertisement unregistered.')
          except Exception as e:
              print(f"Error unregistering advertisement: {e}")
@@ -279,16 +279,16 @@ class Application(object):
         for service in self.services:
             response[service.get_path()] = {
                 GATT_SERVICE_IFACE: {
-                    'UUID': service.UUID,
-                    'Primary': service.Primary
+                    'UUID': GLib.Variant('s', service.UUID),
+                    'Primary': GLib.Variant('b', service.Primary)
                 }
             }
             for chrc in service.characteristics:
                 response[chrc.get_path()] = {
                     GATT_CHRC_IFACE: {
-                        'UUID': chrc.UUID,
-                        'Service': chrc.Service,
-                        'Flags': chrc.Flags
+                        'UUID': GLib.Variant('s', chrc.UUID),
+                        'Service': GLib.Variant('o', chrc.Service),
+                        'Flags': GLib.Variant('as', chrc.Flags)
                     }
                 }
         return response
@@ -298,20 +298,13 @@ class Application(object):
         gatt_manager = self.bus.get(BLUEZ_SERVICE_NAME, ADAPTER_PATH)['org.bluez.GattManager1']
         
         # Publish Object Manager (Application)
-        self.publication = self.bus.publish(self.path, self)
+        self.registration = self.bus.register_object(self.path, self, None)
         
-        # Also publish all services and characteristics?
-        # Standard BlueZ GattManager1.RegisterApplication uses ObjectManager on the app path
-        # to retrieve everything. So we usually only need to publish the app (Root) if it implements ObjectManager.
-        # However, pydbus might need us to explicitely publish the children objects too if we want them to be accessible via DBus 
-        # for other purposes, but the GetManagedObjects return is what matters for registration.
-        # Wait, if BlueZ calls methods on Characteristics (like WriteValue), those objects need to be addressable on DBus!
-        # So yes, we must publish services and characteristics.
-        
+        # Publish children (Services/Chars)
         for service in self.services:
-            self.bus.publish(service.get_path(), service)
+            self.bus.register_object(service.get_path(), service, None)
             for chrc in service.characteristics:
-                self.bus.publish(chrc.get_path(), chrc)
+                self.bus.register_object(chrc.get_path(), chrc, None)
                 
         print('Registering GATT Application...')
         gatt_manager.RegisterApplication(self.path, {})

@@ -1,6 +1,11 @@
 import sys
 from pydbus import SystemBus
 from gi.repository import GLib
+# Use absolute import logic or sys.path hack should be already present in main.py, 
+# but inside this package we can use relative import if loaded as package, 
+# or direct import if sys.path is set.
+# Assuming sys.path is set correctly by main files.
+from common.ble_utils import ADAPTER_PATH
 
 # Constantes DBus
 DBUS_OM_IFACE = 'org.freedesktop.DBus.ObjectManager'
@@ -19,7 +24,7 @@ class Advertisement(object):
     """
     Encapsula o objeto org.bluez.LEAdvertisement1.
     """
-    dbus = f\"\"\"
+    dbus = f"""
     <node>
         <interface name="{LE_ADVERTISEMENT_IFACE}">
             <method name="Release">
@@ -35,7 +40,7 @@ class Advertisement(object):
             <property name="Appearance" type="q" access="read"/>
         </interface>
     </node>
-    \"\"\"
+    """
 
     def __init__(self, bus, index, advertising_type):
         self.path = '/org/bluez/example/advertisement' + str(index)
@@ -102,8 +107,8 @@ class Advertisement(object):
         print(f'{self.path}: Released!')
 
     def register(self):
-        adapter = self.bus.get(BLUEZ_SERVICE_NAME, '/org/bluez/hci0')
-        manager = self.bus.get(BLUEZ_SERVICE_NAME, '/org/bluez/hci0') 
+        adapter = self.bus.get(BLUEZ_SERVICE_NAME, ADAPTER_PATH)
+        manager = self.bus.get(BLUEZ_SERVICE_NAME, ADAPTER_PATH) 
         # Note: In standard BlueZ, LEAdvertisingManager1 is on the adapter path
         # Assuming hci0.
         
@@ -118,7 +123,7 @@ class Advertisement(object):
              # But usually accessing the object allows calling methods.
              # We need to ensure we call it on the right interface.
              # adapter object should have 'RegisterAdvertisement' if it has the interface.
-             lem = self.bus.get(BLUEZ_SERVICE_NAME, '/org/bluez/hci0')['org.bluez.LEAdvertisingManager1']
+             lem = self.bus.get(BLUEZ_SERVICE_NAME, ADAPTER_PATH)['org.bluez.LEAdvertisingManager1']
              lem.RegisterAdvertisement(self.path, {})
              print('Advertisement registered.')
         except Exception as e:
@@ -127,7 +132,7 @@ class Advertisement(object):
 
     def unregister(self):
          try:
-             lem = self.bus.get(BLUEZ_SERVICE_NAME, '/org/bluez/hci0')['org.bluez.LEAdvertisingManager1']
+             lem = self.bus.get(BLUEZ_SERVICE_NAME, ADAPTER_PATH)['org.bluez.LEAdvertisingManager1']
              lem.UnregisterAdvertisement(self.path)
              if hasattr(self, 'publication'):
                  self.publication.unpublish()
@@ -140,14 +145,14 @@ class Service(object):
     """
     GATT Service
     """
-    dbus = f\"\"\"
+    dbus = f"""
     <node>
         <interface name="{GATT_SERVICE_IFACE}">
             <property name="UUID" type="s" access="read"/>
             <property name="Primary" type="b" access="read"/>
         </interface>
     </node>
-    \"\"\"
+    """
 
     def __init__(self, bus, index, uuid, primary):
         self.path = '/org/bluez/example/service' + str(index)
@@ -175,7 +180,7 @@ class Characteristic(object):
     """
     GATT Characteristic
     """
-    dbus = f\"\"\"
+    dbus = f"""
     <node>
         <interface name="{GATT_CHRC_IFACE}">
             <method name="ReadValue">
@@ -195,7 +200,7 @@ class Characteristic(object):
             <property name="Flags" type="as" access="read"/>
         </interface>
     </node>
-    \"\"\"
+    """
 
     def __init__(self, bus, index, uuid, flags, service):
         self.path = service.get_path() + '/char' + str(index)
@@ -248,7 +253,7 @@ class Application(object):
     GATT Application Manager.
     Exports the ObjectManager interface for BlueZ to discover services/characteristics.
     """
-    dbus = f\"\"\"
+    dbus = f"""
     <node>
         <interface name="{DBUS_OM_IFACE}">
             <method name="GetManagedObjects">
@@ -256,7 +261,7 @@ class Application(object):
             </method>
         </interface>
     </node>
-    \"\"\"
+    """
 
     def __init__(self, bus):
         self.path = '/'
@@ -290,7 +295,7 @@ class Application(object):
 
     def register(self):
         # Register App with GATT Manager
-        gatt_manager = self.bus.get(BLUEZ_SERVICE_NAME, '/org/bluez/hci0')['org.bluez.GattManager1']
+        gatt_manager = self.bus.get(BLUEZ_SERVICE_NAME, ADAPTER_PATH)['org.bluez.GattManager1']
         
         # Publish Object Manager (Application)
         self.publication = self.bus.publish(self.path, self)

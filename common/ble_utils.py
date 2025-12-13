@@ -3,7 +3,22 @@ import time
 from pydbus import SystemBus
 
 BUS = SystemBus()
-ADAPTER_PATH = "/org/bluez/hci0"
+
+def find_adapter(bus):
+    try:
+        remote_om = bus.get("org.bluez", "/")
+        objects = remote_om.GetManagedObjects()
+        for path, interfaces in objects.items():
+            if "org.bluez.Adapter1" in interfaces:
+                print(f"[BLE] Using adapter: {path}")
+                return path
+        print("[!] No bluetooth adapter found. Defaulting to /org/bluez/hci0")
+        return "/org/bluez/hci0"
+    except Exception as e:
+        print(f"[!] Error finding adapter: {e}")
+        return "/org/bluez/hci0"
+
+ADAPTER_PATH = find_adapter(BUS)
 
 # UUIDs do Projeto SIC
 SIC_SERVICE_UUID = "12345678-1234-5678-1234-56789abcdef0"

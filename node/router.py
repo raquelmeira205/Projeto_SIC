@@ -69,7 +69,7 @@ class Router:
             time.sleep(1)
             if self.uplink_connection:
                 if (time.time() - self.last_heartbeat_time) > TIMEOUT_LIMIT:
-                    self.ble.disconnect(self.uplink_connection) 
+                    self.ble.disconnect_from_device(self.uplink_connection) 
 
     def handle_disconnection(self, conn):
         to_del = [n for n, c in self.forwarding_table.items() if c == conn]
@@ -84,7 +84,7 @@ class Router:
             self.forwarding_table.clear()
 
             kids = list(self.downlink_connections)
-            for k in kids: self.ble.disconnect(k)
+            for k in kids: self.ble.disconnect_from_device(k)
             self.downlink_connections.clear()
 
     def _route_data(self, src, dest, payload, raw):

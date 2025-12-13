@@ -52,6 +52,9 @@ class Node:
     def __init__(self, nid):
         print(f"[*] Node iniciado: {nid.hex()}")
 
+        # Guardar o NID também no Node para a UI
+        self.node_nid = nid  
+
         self.ble_manager = BLEManager(nid)
         self.security = MockSecurity()
         self.router = Router(nid, self.security, self.ble_manager)

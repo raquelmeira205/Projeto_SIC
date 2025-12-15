@@ -167,12 +167,13 @@ class Service(object):
         <interface name="{GATT_SERVICE_IFACE}">
             <property name="UUID" type="s" access="read"/>
             <property name="Primary" type="b" access="read"/>
+            <property name="Characteristics" type="ao" access="read"/>
         </interface>
     </node>
     """
 
     def __init__(self, bus, index, uuid, primary):
-        self.path = '/org/bluez/example/service' + str(index)
+        self.path = '/org/bluez/sic_node_app/service' + str(index)
         self.bus = bus
         self.uuid = uuid
         self.primary = primary
@@ -191,6 +192,10 @@ class Service(object):
     @property
     def Primary(self):
         return self.primary
+        
+    @property
+    def Characteristics(self):
+        return [c.get_path() for c in self.characteristics]
 
 
 class Characteristic(object):
@@ -215,6 +220,7 @@ class Characteristic(object):
             <property name="Value" type="ay" access="read"/>
             <property name="Notifying" type="b" access="read"/>
             <property name="Flags" type="as" access="read"/>
+            <property name="Descriptors" type="ao" access="read"/>
         </interface>
     </node>
     """
@@ -281,7 +287,7 @@ class Application(object):
     """
 
     def __init__(self, bus):
-        self.path = '/'
+        self.path = '/org/bluez/sic_node_app'
         self.bus = bus
         self.services = []
 
@@ -292,22 +298,33 @@ class Application(object):
         self.services.append(service)
 
     def GetManagedObjects(self):
+        print(f"DEBUG: GetManagedObjects called on {self.path}")
         response = {}
         for service in self.services:
-            response[service.get_path()] = {
-                GATT_SERVICE_IFACE: {
-                    'UUID': GLib.Variant('s', service.UUID),
-                    'Primary': GLib.Variant('b', service.Primary)
-                }
+            # Service Properties
+            service_props = {
+                'UUID': GLib.Variant('s', service.UUID),
+                'Primary': GLib.Variant('b', service.Primary),
+                # Add list of characteristic paths
+                'Characteristics': GLib.Variant('ao', [c.get_path() for c in service.characteristics])
             }
+            response[service.get_path()] = {
+                GATT_SERVICE_IFACE: service_props
+            }
+            
             for chrc in service.characteristics:
-                response[chrc.get_path()] = {
-                    GATT_CHRC_IFACE: {
-                        'UUID': GLib.Variant('s', chrc.UUID),
-                        'Service': GLib.Variant('o', chrc.Service),
-                        'Flags': GLib.Variant('as', chrc.Flags)
-                    }
+                # Characteristic Properties
+                chrc_props = {
+                    'UUID': GLib.Variant('s', chrc.UUID),
+                    'Service': GLib.Variant('o', chrc.Service),
+                    'Flags': GLib.Variant('as', chrc.Flags),
+                    # Add list of descriptor paths (empty for now)
+                    'Descriptors': GLib.Variant('ao', []) 
                 }
+                response[chrc.get_path()] = {
+                    GATT_CHRC_IFACE: chrc_props
+                }
+        print(f"DEBUG: GetManagedObjects Response: {response}")
         return response
 
     def register(self):
@@ -315,13 +332,13 @@ class Application(object):
         gatt_manager = self.bus.get(BLUEZ_SERVICE_NAME, ADAPTER_PATH)['org.bluez.GattManager1']
         
         # Publish Object Manager (Application)
-        self.registration = self.bus.register_object(self.path, self, None)
+        self.registration = self.bus.register_object(self.path, self, self.dbus)
         
         # Publish children (Services/Chars)
         for service in self.services:
-            self.bus.register_object(service.get_path(), service, None)
+            self.bus.register_object(service.get_path(), service, service.dbus)
             for chrc in service.characteristics:
-                self.bus.register_object(chrc.get_path(), chrc, None)
+                self.bus.register_object(chrc.get_path(), chrc, chrc.dbus)
                 
         print('Registering GATT Application...')
         gatt_manager.RegisterApplication(self.path, {})

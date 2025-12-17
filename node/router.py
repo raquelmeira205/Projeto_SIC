@@ -1,6 +1,7 @@
 import time
 import threading
 from common.packet_structs import PacketHeader, MsgType, HeartbeatPayload
+from common.crypto_utils import generate_mac, verify_mac
 
 HEARTBEAT_INTERVAL = 5.0
 MAX_MISSED = 3
@@ -17,6 +18,14 @@ class Router:
         self.uplink_connection = None
         self.downlink_connections = set()
         
+        # Link Layer Security State
+        # Map: connection_handle -> session_key (bytes)
+        self.link_keys = {} 
+        # Map: connection_handle -> last_valid_sequence_number (int)
+        self.replay_counters = {}
+        # Map: connection_handle -> my_outgoing_sequence_number (int)
+        self.my_counters = {}
+
         self.last_heartbeat_time = 0
         self.last_heartbeat_seq = -1
         self.hops_to_sink = -1
@@ -37,27 +46,73 @@ class Router:
         self.uplink_connection = connection_handle
         self.hops_to_sink = hops + 1
         self.last_heartbeat_time = time.time()
+        # Init security state for uplink if not exists
+        if connection_handle not in self.link_keys:
+             # TODO: Integrate with Handshake to set real key. 
+             # For now, using a dummy key or deriving from handshake if available separately
+             self.link_keys[connection_handle] = b'DEFAULT_TEST_KEY_1234567890123456'
+             self.my_counters[connection_handle] = 0
+             self.replay_counters[connection_handle] = 0
 
     def send_app_data(self, dest_nid, payload):
-        packet = PacketHeader.pack(self.my_nid, dest_nid, MsgType.DATA, payload)
-        self._route_data(self.my_nid, dest_nid, payload, packet)
+        # Delegate directly to route_data, which handles packet creation
+        self._route_data(self.my_nid, dest_nid, payload)
         return True
 
     def process_incoming_packet(self, packet_data, incoming_conn):
         try:
-            src, dest, mtype, payload = PacketHeader.unpack(packet_data)
+             # 1. Unpack
+            src, dest, mtype, payload, seq, mac = PacketHeader.unpack(packet_data)
+
+            # 2. Security Checks
+            if not self._verify_security(incoming_conn, packet_data, seq, mac):
+                print(f"[!] Falha de segurança no pacote de {incoming_conn}")
+                return
 
             if incoming_conn and src != self.my_nid:
                 if self.forwarding_table.get(src) != incoming_conn:
                     self.forwarding_table[src] = incoming_conn
+                    # Initialize key placeholder if new connection found via forwarding? 
+                    # Ideally handshake happens first.
 
             if mtype == MsgType.HEARTBEAT:
                 self._handle_heartbeat(payload, incoming_conn, src)
             elif mtype == MsgType.DATA:
-                self._route_data(src, dest, payload, packet_data)
+                self._route_data(src, dest, payload)
 
         except Exception as e:
             print(f"Packet Error: {e}")
+
+    def _verify_security(self, conn, packet_data, seq, received_mac):
+        # Se for loopback/processamento local, assumir seguro ou tratar diferente
+        if conn is None: 
+            return True
+            
+        # 1. Retrieve Key
+        key = self.link_keys.get(conn, b'DEFAULT_TEST_KEY_1234567890123456')
+        
+        # 2. Reconstruct Header with Zero MAC for verification
+        # Necessitamos de reconstruir o cabeçalho exato usado para gerar o MAC
+        # O PacketHeader.pack coloca os bytes na ordem certa.
+        # unpack já separou os dados.
+        # Recriamos o pacote com MAC zerado:
+        src, dest, mtype, payload, _, _ = PacketHeader.unpack(packet_data)
+        
+        # Recriar pacote SOMENTE para verificar MAC (seq_num faz parte do input)
+        check_packet = PacketHeader.pack(src, dest, mtype, payload, seq, b'\x00'*32)
+        
+        if not verify_mac(key, check_packet, received_mac):
+            print(f"[sec] MAC Inválido de {conn}")
+            return False
+
+        # 3. Replay Protection
+        last_seq = self.replay_counters.get(conn, 0)
+        if seq <= last_seq:
+            print(f"[sec] Replay detetado de {conn} (Seq {seq} <= {last_seq})")
+            return False
+            
+        self.replay_counters[conn] = seq
+        return True
 
     def _handle_heartbeat(self, payload, incoming_conn, src_nid):
         if incoming_conn != self.uplink_connection:
@@ -78,9 +133,11 @@ class Router:
         self.last_heartbeat_seq = seq
         self.last_heartbeat_time = time.time()
 
-        fwd_packet = PacketHeader.pack(b'\x00'*16, b'\x00'*16, MsgType.HEARTBEAT, payload)
+        # Re-encapsulate heartbeat for downlinks
+        # NOTE: Header MAC is 0x00*16 for addr? No, src/dest are just headers.
+        # But we must send to each child individually to sign correctly.
         for child in self.downlink_connections:
-            self.ble.send_packet(child, fwd_packet)
+            self._send_authenticated_packet(child, b'\x00'*16, b'\x00'*16, MsgType.HEARTBEAT, payload)
 
     def _monitor_heartbeat_timeout(self):
         while not self._stop_monitor:
@@ -106,12 +163,40 @@ class Router:
             for k in kids: self.ble.disconnect_from_device(k)
             self.downlink_connections.clear()
 
-    def _route_data(self, src, dest, payload, raw):
+    def _route_data(self, src, dest, payload):
+        target_conn = None
+        
         if dest == self.my_nid:
             if self.app_layer: self.app_layer.receive(src, payload)
+            return
         elif dest in self.forwarding_table:
-            self.stats["routed_messages"] += 1
-            self.ble.send_packet(self.forwarding_table[dest], raw)
+            target_conn = self.forwarding_table[dest]
         elif self.uplink_connection:
+            target_conn = self.uplink_connection
+
+        if target_conn:
             self.stats["routed_messages"] += 1
-            self.ble.send_packet(self.uplink_connection, raw)
+            if self._send_authenticated_packet(target_conn, src, dest, MsgType.DATA, payload):
+                pass
+            else:
+                print(f"[!] Falha ao enviar para {target_conn}")
+
+    def _send_authenticated_packet(self, conn, src, dest, msg_type, payload):
+        if conn not in self.link_keys:
+             self.link_keys[conn] = b'DEFAULT_TEST_KEY_1234567890123456'
+             self.my_counters[conn] = 0
+             
+        key = self.link_keys[conn]
+        self.my_counters[conn] += 1
+        seq = self.my_counters[conn]
+        
+        # 1. Pack with Zero MAC
+        temp_packet = PacketHeader.pack(src, dest, msg_type, payload, seq, b'\x00'*32)
+        
+        # 2. Calculate MAC
+        mac = generate_mac(key, temp_packet)
+        
+        # 3. Final Pack
+        final_packet = PacketHeader.pack(src, dest, msg_type, payload, seq, mac)
+        
+        return self.ble.send_packet(conn, final_packet)

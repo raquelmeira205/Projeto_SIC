@@ -9,18 +9,21 @@ class MsgType(IntEnum):
 NID_SIZE = 16
 
 class PacketHeader:
-    FORMAT = f'!{NID_SIZE}s{NID_SIZE}sBH'
+    # Header: Source(16) | Dest(16) | Type(1) | PayloadLen(2) | SeqNum(4) | MAC(32)
+    FORMAT = f'!{NID_SIZE}s{NID_SIZE}sBHI32s' 
     SIZE = struct.calcsize(FORMAT)
 
     @staticmethod
-    def pack(source_nid: bytes, dest_nid: bytes, msg_type: int, payload: bytes) -> bytes:
+    def pack(source_nid: bytes, dest_nid: bytes, msg_type: int, payload: bytes, seq_num: int = 0, mac: bytes = b'\x00'*32) -> bytes:
         payload_len = len(payload)
         header = struct.pack(
             PacketHeader.FORMAT,
             source_nid,
             dest_nid,
             msg_type,
-            payload_len
+            payload_len,
+            seq_num,
+            mac
         )
         return header + payload
     
@@ -32,12 +35,12 @@ class PacketHeader:
         header_bytes = data[:PacketHeader.SIZE]
         payload_bytes = data[PacketHeader.SIZE:]
 
-        src_nid, dest_nid, msg_type, payload_len = struct.unpack(PacketHeader.FORMAT, header_bytes)
+        src_nid, dest_nid, msg_type, payload_len, seq_num, mac = struct.unpack(PacketHeader.FORMAT, header_bytes)
 
         if len(payload_bytes) != payload_len:
             print(f"Aviso: Tamanho do payload ({len(payload_bytes)}) difere do declarado ({payload_len})")
 
-        return src_nid, dest_nid, msg_type, payload_bytes
+        return src_nid, dest_nid, msg_type, payload_bytes, seq_num, mac
     
 class HeartbeatPayload:
 

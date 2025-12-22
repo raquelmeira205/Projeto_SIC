@@ -101,17 +101,45 @@ class BLEManager:
     # ------------------------------------------------------------------
 
     def connect_to_device(self, mac):
-        device = get_device_object(mac)
+        import time
+        
+        # Wait for device to appear in D-Bus (from scan)
+        max_wait = 5
+        device = None
+        for i in range(max_wait):
+            device = get_device_object(mac)
+            if device:
+                break
+            print(f"[*] Aguardando dispositivo aparecer no D-Bus... ({i+1}/{max_wait})")
+            time.sleep(1)
+        
         if not device:
+            print(f"[!] Dispositivo {mac} não encontrado no D-Bus")
             return False
 
         try:
+            # Check if already connected
+            if hasattr(device, 'Connected') and device.Connected:
+                print(f"[*] Já conectado a {mac}")
+                return True
+            
             print(f"[*] Conectando a {mac}")
             device.Connect()
-            return True
+            
+            # Wait for connection to establish
+            for i in range(10):
+                time.sleep(0.5)
+                if hasattr(device, 'Connected') and device.Connected:
+                    print(f"[*] Conexão estabelecida com {mac}")
+                    return True
+            
+            print(f"[!] Timeout aguardando conexão com {mac}")
+            return False
+            
         except Exception as e:
             print(f"[!] Erro conexão {mac}: {e}")
             return False
+
 
     def disconnect_from_device(self, mac):
         device = get_device_object(mac)
@@ -141,6 +169,7 @@ class BLEManager:
         
         try:
             from node.ble_discovery import BLEDiscovery
+            import time
             
             scanner = BLEDiscovery('hci0')
             devices = scanner.scan(duration_ms=10000)  # 10 second scan
@@ -158,6 +187,18 @@ class BLEManager:
                         'nid': dev.get('nid')
                     })
                     print(f"  Found: {dev['mac']} | Hop:{hop} | RSSI:{dev.get('rssi', 0)}")
+            
+            # IMPORTANT: Also do a short D-Bus scan to register devices in BlueZ
+            # This is needed for subsequent D-Bus Connect() calls to work
+            if result:
+                print("[*] Registering devices in BlueZ D-Bus...")
+                try:
+                    adapter = BUS.get("org.bluez", ADAPTER_PATH)
+                    adapter.StartDiscovery()
+                    time.sleep(2)  # Short discovery to register devices
+                    adapter.StopDiscovery()
+                except Exception as e:
+                    print(f"[!] D-Bus registration warning: {e}")
             
             print(f"[*] Found {len(result)} SIC devices")
             return result

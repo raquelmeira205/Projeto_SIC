@@ -59,6 +59,7 @@ class BLEDiscovery:
         CUSTOM_ADV_ID = 0xFFFE
         if CUSTOM_ADV_ID in manuf_data:
             data = manuf_data[CUSTOM_ADV_ID]
+            logging.info(f"Raw Manuf Data for {CUSTOM_ADV_ID}: {data.hex()}")
             if len(data) >= 1:
                 info['hop_count'] = data[0]
                 if len(data) > 1:

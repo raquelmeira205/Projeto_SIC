@@ -5,6 +5,7 @@ class MsgType(IntEnum):
     DATA = 1
     HEARTBEAT = 2
     CONTROL = 3
+    HANDSHAKE = 4
 
 NID_SIZE = 16
 

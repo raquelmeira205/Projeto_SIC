@@ -12,15 +12,18 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from common.bluez_classes import Advertisement, Application, Service, Characteristic
 from common.ble_utils import BUS, SIC_SERVICE_UUID, SIC_RX_CHAR_UUID, get_device_object, get_gatt_characteristic
 from common.pki_utils import read_nid_from_cert
+from common.security_handshake import SecurityHandshake
+from common.packet_structs import PacketHeader, MsgType, NID_SIZE
+from common.crypto_utils import verify_mac
 from sink.heartbeat_service import HeartbeatService
+import queue
 
 ADAPTER_PATH = "/org/bluez/hci0"
 
 # UUIDs
 
-class MockSecurity:
-    def sign_data(self, data):
-        return b"mock_signature_123" # 16+ bytes?
+# UUIDs
+
 
 class SinkConnectionManager:
     def __init__(self, sink_nid_bytes):
@@ -78,26 +81,38 @@ class SinkConnectionManager:
             pass # Ignorar falhas de envio (best effort)
 
 class RxCharacteristic(Characteristic):
-    def __init__(self, bus, index, service):
+    def __init__(self, bus, index, service, callback):
         super().__init__(bus, index, SIC_RX_CHAR_UUID, ['write'], service)
+        self.callback = callback
         
     def WriteValue(self, value, options):
         val_bytes = bytes(value)
-        print(f"[Sink-RX] Recebidos {len(val_bytes)} bytes. (Dados do Sensor?)")
-        # Aqui processaria os dados recebidos dos nós
-        # Ex: parse packet, log, store database...
+        sender = "unknown"
+        if "device" in options:
+             dev_path = options["device"]
+             # /org/bluez/hci0/dev_XX_XX_XX_XX_XX_XX
+             parts = dev_path.split('_')
+             if len(parts) >= 6:
+                 sender = ":".join(parts[-6:])
+                 
+        if self.callback:
+            self.callback(val_bytes, sender)
 
 class SinkApplication(Application):
-    def __init__(self, bus):
+    def __init__(self, bus, recv_callback):
         super().__init__(bus)
         self.service = Service(bus, 0, SIC_SERVICE_UUID, True)
         self.add_service(self.service)
-        self.char = RxCharacteristic(bus, 0, self.service)
+        self.char = RxCharacteristic(bus, 0, self.service, recv_callback)
         self.service.add_characteristic(self.char)
+
+from sink.sink_logic import SinkLogic
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cert", default="certs/sink.crt", help="Caminho para o certificado do Sink")
+    parser.add_argument("--key", default="certs/sink.key", help="Caminho para chave privada")
+    parser.add_argument("--ca", default="certs/ca.crt")
     args = parser.parse_args()
     
     sink_nid = read_nid_from_cert(args.cert)
@@ -112,29 +127,31 @@ def main():
     t_glib.daemon = True
     t_glib.start()
     
-    # 2. Managers
-    conn_manager = SinkConnectionManager(sink_nid)
-    security = MockSecurity()
+    # 2. Logic & Security
+    logic = SinkLogic(sink_nid, args.cert, args.key, args.ca)
     
-    # 3. Heartbeat Service
-    hb_service = HeartbeatService(sink_nid, conn_manager, security)
-    
-    # 4. GATT Server (Receive Data)
-    app = SinkApplication(BUS)
+    # 3. GATT Server (Receive Data) -> Connect callback to Logic
+    app = SinkApplication(BUS, logic.on_packet_received)
     app.register()
     
-    # Start
+    # 4. Connection Manager (Advertisement)
+    conn_manager = SinkConnectionManager(sink_nid)
     conn_manager.start_advertising()
-    hb_service.start()
     
-    print("[Sink] Sink a correr. Pressione Ctrl+C para sair.")
+    # 5. Heartbeat Service (Optional integration with logic?)
+    # For now keep it separate or logic can access it?
+    security = MockSecurity() # Deprecated?
+    # hb_service = HeartbeatService(sink_nid, conn_manager, security)
+    # hb_service.start()
+    
+    print("[Sink] Sink seguro a correr. Aguardando conexões...")
     
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
         print("\n[Sink] A encerrar...")
-        hb_service.stop()
+        # hb_service.stop()
         loop.quit()
 
 if __name__ == "__main__":

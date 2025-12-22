@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 import sys
 import os
@@ -12,19 +11,19 @@ from gi.repository import GLib
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from common.certificate_parser import read_nid_from_cert
-from common.packet_headers import PacketHeader, MsgType, HeartbeatPayload
+from common.packet_structs import PacketHeader, MsgType
 from common.constants import SIC_SERVICE_UUID
-from common.bluez_classes import Advertisement
-from common.ble_utils import BUS, ADAPTER_PATH  # We still need BUS for Advertisement
+from common.ble_utils import BUS, ADAPTER_PATH
 
-from node.ble_discovery import BLEDiscovery
-from node.uplink_selector import UplinkSelector
-from node.heartbeat_timeout import HeartbeatMonitor
+from node.ble_manager import BLEManager
+from node.router import Router
 from node.node_gatt_server import NodeGATTServer
 from node.node_ui import NodeUI
+from common.security_handshake import SecurityHandshake
+from node.ble_handshake_transport import BLEHandshakeTransport
 
 class Node:
-    def __init__(self, cert_path, key_path):
+    def __init__(self, cert_path, key_path, ca_cert_path="certs/ca.crt"):
         self.cert_path = cert_path
         self.key_path = key_path
         
@@ -36,42 +35,50 @@ class Node:
              print(f"Failed to load cert: {e}")
              sys.exit(1)
 
-        # State
-        self.sink_nid = None
-        self.current_uplink_mac = None
-        self.hop_count = 0 # Testing: Force Hop Count 0
-        self.forwarding_table = {} # Dest NID bytes -> Next Hop MAC
-        self.stats = {'lost_heartbeats': 0, 'routed_messages': 0}
-        self.scan_results = []
-
         # Components
-        self.ble_discovery = BLEDiscovery()
-        self.uplink_selector = UplinkSelector(self.ble_discovery)
-        self.hb_monitor = HeartbeatMonitor(self._on_heartbeat_timeout)
+        self.ble = BLEManager(self.nid.bytes)
+        self.security = SecurityHandshake(cert_path, key_path, ca_cert_path)
+        self.router = Router(self.nid.bytes, self.security, self.ble)
         self.gatt_server = NodeGATTServer(BUS, self._on_packet_received)
         self.ui = NodeUI(self)
         
-        self.advertisement = None
         self.running = False
+        self.handshake_transport = None
+
+        # Expose properties for UI
+        self.stats = self.router.stats
+        self.forwarding_table = self.router.forwarding_table
+        
+    @property
+    def current_uplink_mac(self):
+        return self.ble.uplink_addr
+        
+    @property
+    def hop_count(self):
+        return self.ble.hop_count
+        
+    @property
+    def sink_nid(self):
+        return self.router.sink_nid
 
     def start(self):
         self.running = True
         
-        # 1. Start GLib Loop in Thread (Must be first to handle DBus callbacks)
+        # 1. Start GLib Loop
         self.t_glib = threading.Thread(target=self._run_glib, daemon=True)
         self.t_glib.start()
         
-        # 2. Start GATT Server (Registers with BlueZ, requires Loop)
+        # 2. Start GATT Server
         self.gatt_server.start()
         
-        # 2. Start Logic Loop (Uplink, etc)
+        # 3. Start Advertisement
+        self.ble.start_advertising()
+        
+        # 4. Start Logic Loop
         self.t_logic = threading.Thread(target=self._logic_loop, daemon=True)
         self.t_logic.start()
-        
-        # 3. Start Advertisement
-        self._update_advertisement()
 
-        # 4. Start UI (Blocking)
+        # 5. Start UI
         try:
             self.ui.start()
         except KeyboardInterrupt:
@@ -79,15 +86,12 @@ class Node:
 
     def stop(self):
         self.running = False
-        if self.advertisement:
-            try:
-                self.advertisement.unregister(ADAPTER_PATH)
-            except:
-                pass
-        print("\nNode stopped. Returning to terminal.")
+        self.ble.update_advertisement() # Cleans up if logic handled
+        print("\nNode stopped.")
 
     def reset_stats(self):
-        self.stats = {'lost_heartbeats': 0, 'routed_messages': 0}
+        self.router.stats['lost_heartbeats'] = 0
+        self.router.stats['routed_messages'] = 0
 
     def _run_glib(self):
         loop = GLib.MainLoop()
@@ -95,150 +99,123 @@ class Node:
 
     def _logic_loop(self):
         while self.running:
-            # Check Uplink
-            if not self.current_uplink_mac:
-                self.ui.log("Scanning for Uplink...")
-                best, candidates = self.uplink_selector.select_best_uplink()
-                if candidates:
-                    self.scan_results = candidates
-                    self.ui.update_scan_results(candidates)
-                if best:
-                    self._connect_uplink(best)
+            # Periodic Scan if not connected
+            if not self.ble.uplink_addr:
+                self.ui.log("Scanning...")
+                raw_devices = self.ble.scan(duration=4)
+                
+                # Convert tuples to dicts for UI
+                # Tuple: (mac, name, hop, rssi, nid)
+                candidates = []
+                for d in raw_devices:
+                    # Show all devices, even if not part of network (Hop=-1)
+                    candidates.append({
+                        'mac': d[0],
+                        'name': d[1],
+                        'hop_count': d[2],
+                        'rssi': d[3],
+                        'nid': d[4]
+                    })
+                
+                self.ui.update_scan_results(candidates)
+            else:
+                # Update advertisement if needed, verify connection
+                self.ble.monitor_connection_status()
             
-            # Monitoring
-            self.hb_monitor.check()
-            
-            time.sleep(5)
+            time.sleep(2)
 
-    def _connect_uplink(self, uplink_info):
-        # Uplink info has 'peripheral', 'hop_count', 'nid'
-        mac = uplink_info['mac']
-        hop = uplink_info['hop_count']
-        nid = uplink_info['nid']
+    def connect_manual(self, candidate):
+        mac = candidate['mac']
+        hop = candidate['hop_count']
+        peer_nid = candidate['nid']
         
-        self.ui.log(f"Connecting Uplink: {mac} (Hop {hop})")
+        self.ui.log(f"Connecting to {mac}...")
         
-        # Do we need to maintain an open connection object?
-        # Yes if we want to send data up efficiently.
-        # But simplepyble might disconnect if we don't hold the reference.
-        # uplifting_info['peripheral'] is the object.
+        # 1. Connect BLE
+        if not self.ble.connect_to_device(mac):
+            self.ui.log("BLE Connection Failed")
+            return
+            
+        self.ui.log("BLE Connected. Starting Handshake...")
         
+        # 2. Handshake
         try:
-            p = uplink_info['peripheral']
-            if not p.is_connected():
-                p.connect()
+            self.handshake_transport = BLEHandshakeTransport(self.ble, mac, self.nid, peer_nid)
+            self.security.perform_handshake(self.handshake_transport)
+            session_key = self.security.session_key
             
-            self.current_uplink_mac = mac
-            self.hop_count = hop + 1
-            # Update Advertisement to reflect new Hop Count
-            self._update_advertisement()
+            self.ui.log("Handshake Success!")
             
-            self.hb_monitor.start()
-            self.ui.log(f"Uplink Established. My Hop Count: {self.hop_count}")
+            # 3. Register with Router / BLE Manager
+            self.ble.uplink_addr = mac
+            self.ble.hop_count = hop + 1
+            self.ble.update_advertisement()
+            
+            self.router.set_uplink(mac, hop, session_key)
+            self.ui.log(f"Uplink set. Hop Count: {self.ble.hop_count}")
             
         except Exception as e:
-            self.ui.log(f"Failed to connect uplink {mac}: {e}")
-
-    def _on_heartbeat_timeout(self):
-        self.stats['lost_heartbeats'] += 1
-        self.ui.log("Heartbeat Timeout! Lost Uplink.")
-        # Disconnect uplink
-        self.current_uplink_mac = None
-        self.hop_count = -1
-        self._update_advertisement()
-        self.hb_monitor.stop()
-
-    def _update_advertisement(self):
-        # Register/Update Advertisement with BlueZ
-        # We need a unique index ideally, or just 0
-        if self.advertisement:
-             try: self.advertisement.unregister(ADAPTER_PATH)
-             except: pass
-        
-        self.advertisement = Advertisement(BUS, 0, 'peripheral')
-        self.advertisement.add_local_name(f"SIC-Node-{self.nid.hex[-4:]}")
-        self.advertisement.add_service_uuid(SIC_SERVICE_UUID)
-        
-        # Manuf Data: Hop Count + NID (or partial NID)
-        hc = self.hop_count if self.hop_count >= 0 else 0xFF
-        payload = bytes([hc]) + self.nid.bytes
-        self.advertisement.add_manufacturer_data(0xFFFE, payload)
-        
-        try:
-             self.advertisement.register(ADAPTER_PATH)
-        except Exception as e:
-             self.ui.log(f"Adv Reg Failed: {e}")
+            self.ui.log(f"Handshake Failed: {e}")
+            self.ble.disconnect_from_device(mac)
+            self.handshake_transport = None
 
     def _on_packet_received(self, data, sender_mac):
         try:
-            # Parse Packet
-            src, dest, mtype, payload = PacketHeader.unpack(data)
-            self.ui.log(f"Msg from {src.hex()[:4]}.. to {dest.hex()[:4]}.. Type={mtype}")
+            # Peek at header to check type
+            if len(data) < PacketHeader.SIZE:
+                return
+
+            src, dest, mtype, payload, seq, mac = PacketHeader.unpack(data)
             
-            # 1. Is it for me?
-            if dest == self.nid.bytes:
-                 self._handle_local_packet(src, mtype, payload)
-                 return
-            
-            # 2. Is it Heartbeat? (Variables like Broadcast/Multicast)
-            if mtype == MsgType.HEARTBEAT:
-                self._handle_heartbeat(payload, src)
-                
-            # 3. Forwarding Logic
-            # If for me or Broadcast -> Processed.
-            # If unicast for others -> Route.
-            if dest != self.nid.bytes:
-                 self._route_packet(dest, data)
-                 
+            if mtype == MsgType.HANDSHAKE:
+                 if self.handshake_transport:
+                     # We assume handshake transport is active if we are expecting one?
+                     # Or request from downlink?
+                     # If we are the Acceptor (Downlink connecting to us), we need to handle that too?
+                     # The USER request only mentioned "User chooses uplink".
+                     # But we must support incoming handshakes if we are an uplink for someone else?
+                     # "SecurityHandshake integration... Protocol Flow: Connection... _connect_uplink method is called."
+                     # The user prompt focused on the Node behaving as a client connecting to Uplink.
+                     # But if another Node connects to US, we are the Server/Uplink.
+                     # The prompt says: "When a link is established (e.g., via Force Connect), the _connect_uplink method is called."
+                     # It describes the ACTIVE connection side.
+                     # For the passive side (serving), `SecurityHandshake` module might need to be called in `accept` mode?
+                     # The `SecurityHandshake.perform_handshake` code (Step 18) initiates: `exchange_certificates`, `verify`, `generate_ephemeral_key`.
+                     # It seems symmetric or client-driven?
+                     # `exchange_certificates`: Send my cert, receive peer cert.
+                     # `perform_handshake`: 
+                     #   exchange_certificates
+                     #   verify_peer_certificate
+                     #   generate_ephemeral_key
+                     #   sign_ephemeral_key
+                     #   send(pub), send(sig)
+                     #   receive(pub), receive(sig)
+                     # This protocol is SYMMETRIC/Synchronous. Both sides must do it.
+                     # If I receive a HANDSHAKE packet, it means someone is initiating handshake or responding?
+                     # If I didn't initiate, I should probably handle it.
+                     # But the Prompt "The node displays... user should choose... integrated... perform_handshake is executed."
+                     # I will focus on the Client Side (Connecting to Uplink) as requested.
+                     # Handling incoming handshakes might be implicit or out of scope for this specific task "nodes choose automatically... that needs to change".
+                     
+                     self.handshake_transport.on_packet_received(payload)
+                 else:
+                     # Maybe an incoming connection trying to handshake?
+                     # For now ignore or log.
+                     pass
+            else:
+                 self.router.process_incoming_packet(data, sender_mac)
+
         except Exception as e:
-            self.ui.log(f"Packet Error: {e}")
-
-    def _handle_heartbeat(self, payload, src_nid):
-        # Check signature (Mocking or using common.crypto)
-        # Verify it came from Uplink?
-        # Update monitor
-        self.hb_monitor.heartbeat_received()
-        
-        seq, sig = HeartbeatPayload.unpack(payload)
-        self.ui.log(f"Heartbeat #{seq} received.")
-        
-        # Capture Sink NID if first time
-        if not self.sink_nid and self.hop_count > 0:
-             self.sink_nid = src_nid # Approx logic, usually source of HB is Sink
-             
-        # Forward Heartbeat Downstream?
-        # We need to broadcast it to our downlinks.
-        # But we are utilizing "Advertised" topology mostly.
-        # If we have connected downlinks (Nodes that connected to US), we should write to them.
-        # But NodeGATTServer doesn't track connected downlinks automatically unless we implement it.
-        # We can implement a "Downlink Manager" similar to Sink's if needed.
-        pass
-
-    def _route_packet(self, dest_nid, raw_data):
-        self.stats['routed_messages'] += 1
-        # Look up next hop
-        # If in forwarding table -> send
-        # Else -> send to uplink? (Default Route)
-        
-        # Simulating routing:
-        if self.current_uplink_mac:
-            # Send UP to Uplink
-             # We need to write to Uplink's RX Char
-             # We have 'peripheral' object in _connect_uplink? We didn't store it globally.
-             # Ideally we should store Uplink Peripheral object.
-             pass
-
-    def _handle_local_packet(self, src, mtype, payload):
-        if mtype == MsgType.DATA:
-             self.ui.log(f"Data received: {payload}")
+            print(f"Packet Error: {e}")
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cert", default="certs/nodeA.crt")
     parser.add_argument("--key", default="certs/nodeA.key")
+    parser.add_argument("--ca", default="certs/ca.crt")
     args = parser.parse_args()
     
-    node = Node(args.cert, args.key)
+    node = Node(args.cert, args.key, args.ca)
     node.start()
 
 if __name__ == "__main__":

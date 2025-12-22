@@ -140,7 +140,7 @@ def main():
     
     # 5. Heartbeat Service (Optional integration with logic?)
     # For now keep it separate or logic can access it?
-    security = MockSecurity() # Deprecated?
+    # security = MockSecurity() # Deprecated?
     # hb_service = HeartbeatService(sink_nid, conn_manager, security)
     # hb_service.start()
     

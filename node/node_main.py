@@ -124,38 +124,42 @@ class Node:
             
             time.sleep(2)
 
-    def connect_manual(self, candidate):
-        mac = candidate['mac']
-        hop = candidate['hop_count']
-        peer_nid = candidate['nid']
-        
+    def connect_manual(self, mac, hop):
         self.ui.log(f"Connecting to {mac}...")
         
-        # 1. Connect BLE
+        # 1. BLE Connect
+        self.ui.log("  -> BLE Connecting...")
         if not self.ble.connect_to_device(mac):
-            self.ui.log("BLE Connection Failed")
+            self.ui.log("  -> BLE Connection Failed!")
             return
-            
-        self.ui.log("BLE Connected. Starting Handshake...")
         
+        self.ui.log("  -> BLE Connected. Handshake...")
+
         # 2. Handshake
         try:
-            self.handshake_transport = BLEHandshakeTransport(self.ble, mac, self.nid, peer_nid)
+            # We must set uplink temporarily to allow transport? 
+            # Handshake transport needs MAC.
+            transport = BLEHandshakeTransport(self.ble, mac, self.nid)
+            self.handshake_transport = transport
+            
+            # Start Handshake
             self.security.perform_handshake(self.handshake_transport)
+            
+            # If success, derive key
             session_key = self.security.session_key
+            self.ui.log(f"  -> Handshake Success!")
             
-            self.ui.log("Handshake Success!")
-            
-            # 3. Register with Router / BLE Manager
+            # 3. Finalize
             self.ble.uplink_addr = mac
             self.ble.hop_count = hop + 1
             self.ble.update_advertisement()
             
             self.router.set_uplink(mac, hop, session_key)
-            self.ui.log(f"Uplink set. Hop Count: {self.ble.hop_count}")
+            self.ui.log(f"Uplink set. New Hop: {self.ble.hop_count}")
             
         except Exception as e:
             self.ui.log(f"Handshake Failed: {e}")
+            logging.error(f"Handshake failed for {mac}: {e}", exc_info=True) # Explicit error logging
             self.ble.disconnect_from_device(mac)
             self.handshake_transport = None
 

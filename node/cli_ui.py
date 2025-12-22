@@ -83,6 +83,7 @@ class NodeCLI:
         print("\nAvailable Commands:")
         print("  scan              - Scan for nearby BLE devices")
         print("  connect <index>   - Connect to device by index from scan results")
+        print("  connect <MAC>     - Connect to device by MAC address (XX:XX:XX:XX:XX:XX)")
         print("  status            - Show current node status")
         print("  stats             - Show statistics")
         print("  send <message>    - Send message to sink")
@@ -117,15 +118,37 @@ class NodeCLI:
         threading.Thread(target=scan_thread, daemon=True).start()
     
     def _cmd_connect(self, args):
-        """Connect to device by index"""
+        """Connect to device by index or MAC address"""
         if not args:
-            print("Usage: connect <index>")
+            print("Usage: connect <index|MAC>")
             return
         
+        # Check if it's a MAC address (contains colons)
+        if ':' in args:
+            mac = args.strip()
+            name = mac
+            print(f"Connecting to {mac}...")
+            
+            def connect_thread():
+                try:
+                    success = self.node.force_connect(mac)
+                    if success:
+                        print(f"\n✓ Connected to {name}")
+                    else:
+                        print(f"\n✗ Failed to connect to {name}")
+                    print("> ", end="", flush=True)
+                except Exception as e:
+                    print(f"\n✗ Connection error: {e}")
+                    print("> ", end="", flush=True)
+            
+            threading.Thread(target=connect_thread, daemon=True).start()
+            return
+        
+        # Otherwise treat as index
         try:
             index = int(args)
         except ValueError:
-            print("Invalid index. Must be a number.")
+            print("Invalid input. Must be an index number or MAC address (XX:XX:XX:XX:XX:XX)")
             return
         
         if index < 0 or index >= len(self.scan_results):

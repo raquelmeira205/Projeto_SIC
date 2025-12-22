@@ -114,6 +114,15 @@ def scan_nearby_devices(duration=10):
                         if len(adv_data) > 1:
                             hop_count = adv_data[0]
                             nid = bytes(adv_data[1:])
+                    elif name and name.startswith("SIC-"):
+                        # Fallback: Se não temos manufacturer data mas o nome é SIC-Sink ou SIC-Node
+                        # Assume hop count 0 para Sink, 255 para desconhecido
+                        if "Sink" in name:
+                            hop_count = 0
+                            print(f"       [FALLBACK] Detected SIC device by name: {name}")
+                        else:
+                            hop_count = 255
+                            print(f"       [FALLBACK] Detected SIC device by name: {name}")
                     
                     # Lógica de atualização: Se é novo ou se o sinal melhorou
                     if mac not in discovered_devices_metrics or rssi > discovered_devices_metrics[mac]['rssi']:

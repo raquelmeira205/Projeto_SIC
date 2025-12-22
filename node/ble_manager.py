@@ -134,6 +134,27 @@ class BLEManager:
     # Uplink logic
     # ------------------------------------------------------------------
 
+    def scan_for_devices(self):
+        """Manual scan for nearby devices without connecting"""
+        print("\n--- Manual scan for devices ---")
+        
+        devices = scan_nearby_devices(duration=10)
+        
+        # Return structured list
+        result = []
+        for mac, name, hop, rssi, nid in devices:
+            if hop >= 0:  # Only include valid SIC devices
+                result.append({
+                    'mac': mac,
+                    'name': name,
+                    'hop_count': hop,
+                    'rssi': rssi,
+                    'nid': nid
+                })
+        
+        print(f"[*] Found {len(result)} devices")
+        return result
+
     def find_and_connect_uplink(self):
         print("\n--- Procurando uplink ---")
 

@@ -3,7 +3,6 @@ import os
 import threading
 import time
 import argparse
-import tkinter as tk
 from gi.repository import GLib
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -13,7 +12,7 @@ from common.ble_utils import BUS, SIC_SERVICE_UUID, SIC_RX_CHAR_UUID
 from common.pki_utils import read_nid_from_cert
 from node.ble_manager import BLEManager
 from node.router import Router
-from node.ui import IoTNodeUI
+from node.cli_ui import NodeCLI
 
 
 class MockSecurity:
@@ -94,11 +93,13 @@ class Node:
         time.sleep(2)
         while self.running:
             self.ble_manager.monitor_connection_status()
-
-            if not self.ble_manager.uplink_addr and self.ble_manager.hop_count == -1:
-                self.ble_manager.find_and_connect_uplink()
-
+            # Manual mode: no automatic uplink search
             time.sleep(10)
+    
+    def scan_for_uplinks(self):
+        """Manually trigger BLE scan for nearby devices"""
+        print("[*] Manual scan triggered")
+        return self.ble_manager.scan_for_devices()
 
     def send_to_sink(self, text):
         if not self.router.sink_nid:
@@ -152,11 +153,11 @@ def main():
     node = Node(nid)
     node.start_logic_loop()
 
-    root = tk.Tk()
-    ui = IoTNodeUI(root, node_ref=node)
-
+    # Start CLI interface
+    cli = NodeCLI(node)
+    
     try:
-        root.mainloop()
+        cli.start()
     finally:
         node.running = False
         loop.quit()

@@ -11,6 +11,7 @@ class NodeUI:
         self.logs = []
         self.max_logs = 10
         self.scan_results = []
+        self.scanning = False  # Track scan state
 
         # Handle Ctrl+C gracefully
         signal.signal(signal.SIGINT, self._handle_sigint)
@@ -59,6 +60,10 @@ class NodeUI:
                     elif key == ord('r'):
                         self.node.reset_stats()
                         self.log("Stats reset")
+                    elif key == ord('s'):
+                        self._trigger_scan()
+                    elif ord('0') <= key <= ord('9'):
+                        self._select_device(key - ord('0'))
             except Exception as e:
                 with open("ui_error.log", "a") as f:
                     f.write(f"{time.ctime()} UI Error: {e}\n")
@@ -107,15 +112,15 @@ class NodeUI:
         # Scan Results
         self._safe_addstr(6, 40, "Scan Results:", curses.A_BOLD)
         row = 7
-        for dev in self.scan_results[:15]: 
+        for idx, dev in enumerate(self.scan_results[:10]):  # Show max 10 devices (0-9)
              name = dev.get('name')
              mac = dev.get('mac', 'Unknown')
              if not name:
                  name = mac
              hop = dev.get('hop_count', -1)
              rssi = dev.get('rssi', 0)
-             # Show a bit more info: Name (Hop: X, RSSI: Y)
-             self._safe_addstr(row, 40, f"  {name} (Hop:{hop} RSSI:{rssi})")
+             # Show index for selection: [0] Device (Hop: X, RSSI: Y)
+             self._safe_addstr(row, 40, f"  [{idx}] {name} (Hop:{hop} RSSI:{rssi}"[:38])
              row += 1
 
         # Logs
@@ -127,6 +132,52 @@ class NodeUI:
                 row += 1
 
         # Controls
-        self._safe_addstr(h-1, 0, "[q] Quit  [r] Reset Stats", curses.A_REVERSE)
+        scan_status = " (Scanning...)" if self.scanning else ""
+        self._safe_addstr(h-1, 0, f"[q] Quit  [r] Reset  [s] Scan{scan_status}  [0-9] Select Device", curses.A_REVERSE)
 
         stdscr.refresh()
+    
+    def _trigger_scan(self):
+        """Trigger manual scan in background thread"""
+        if self.scanning:
+            self.log("Scan already in progress")
+            return
+        
+        self.scanning = True
+        self.log("Starting manual scan...")
+        
+        def scan_thread():
+            try:
+                results = self.node.scan_for_uplinks()
+                self.scan_results = results
+                self.log(f"Scan complete: {len(results)} devices found")
+            except Exception as e:
+                self.log(f"Scan error: {e}")
+            finally:
+                self.scanning = False
+        
+        threading.Thread(target=scan_thread, daemon=True).start()
+    
+    def _select_device(self, index):
+        """Select and connect to device by index"""
+        if index >= len(self.scan_results):
+            self.log(f"Invalid selection: {index}")
+            return
+        
+        device = self.scan_results[index]
+        mac = device['mac']
+        name = device.get('name', mac)
+        
+        self.log(f"Connecting to {name} ({mac})...")
+        
+        def connect_thread():
+            try:
+                success = self.node.force_connect(mac)
+                if success:
+                    self.log(f"Connected to {name}")
+                else:
+                    self.log(f"Failed to connect to {name}")
+            except Exception as e:
+                self.log(f"Connection error: {e}")
+        
+        threading.Thread(target=connect_thread, daemon=True).start()

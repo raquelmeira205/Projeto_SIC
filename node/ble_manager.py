@@ -55,7 +55,8 @@ class BLEManager:
         # Hop count: -1 → 0xFF
         hc = self.hop_count if self.hop_count >= 0 else 0xFF
         payload = bytes([hc]) + self.node_nid
-
+        
+        print(f"[DEBUG] Node advertising: ID=0xFFFE ({0xFFFE}), hop={hc}, payload={payload.hex()}")
         self.advertisement.add_manufacturer_data(0xFFFE, payload)
 
         try:

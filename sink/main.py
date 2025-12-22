@@ -43,6 +43,7 @@ class SinkConnectionManager:
         # Manufacturer Data:
         # [ hop_count (1 byte) | sink_nid (N bytes) ]
         manuf_payload = bytes([0]) + self.sink_nid
+        print(f"[DEBUG] Setting manufacturer data: ID=0xFFFE ({0xFFFE}), payload={manuf_payload.hex()}")
         self.advertisement.add_manufacturer_data(0xFFFE, manuf_payload)
 
         # REQUIRED FIX

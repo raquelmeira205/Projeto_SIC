@@ -69,7 +69,9 @@ class NodeUI:
                             candidate = self.scan_results[self.selected_index]
                             self.log(f"Selected: {candidate.get('mac')}")
                             # Connect in a separate thread to not block UI
-                            threading.Thread(target=self.node.connect_manual, args=(candidate,), daemon=True).start()
+                            mac = candidate.get('mac')
+                            hop = candidate.get('hop_count', -1)
+                            threading.Thread(target=self.node.connect_manual, args=(mac, hop), daemon=True).start()
             except Exception as e:
                 with open("ui_error.log", "a") as f:
                     f.write(f"{time.ctime()} UI Error: {e}\n")

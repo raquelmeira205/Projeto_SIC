@@ -41,8 +41,10 @@ class SinkConnectionManager:
         )
 
         # Optional but useful for debugging
-        self.advertisement.add_local_name("SIC-Sink")
-
+        # Shortened name to fit 31-byte limit:
+        # Flags(3) + Manuf(21) + Name(6) = 30 bytes.
+        # self.advertisement.add_local_name("Sink")
+        
         # Manufacturer Data:
         # [ hop_count (1 byte) | sink_nid (N bytes) ]
         manuf_payload = bytes([0]) + self.sink_nid
@@ -148,7 +150,8 @@ def main():
     
     try:
         while True:
-            time.sleep(1)
+            time.sleep(5)
+            print("[Sink] Alive... (Advertising)")
     except KeyboardInterrupt:
         print("\n[Sink] A encerrar...")
         # hb_service.stop()

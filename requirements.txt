@@ -1,0 +1,4 @@
+simplepyble
+pydbus
+cryptography
+PyGObject

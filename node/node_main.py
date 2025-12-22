@@ -39,9 +39,10 @@ class Node:
         # State
         self.sink_nid = None
         self.current_uplink_mac = None
-        self.hop_count = -1
+        self.hop_count = 0 # Testing: Force Hop Count 0
         self.forwarding_table = {} # Dest NID bytes -> Next Hop MAC
         self.stats = {'lost_heartbeats': 0, 'routed_messages': 0}
+        self.scan_results = []
 
         # Components
         self.ble_discovery = BLEDiscovery()
@@ -97,7 +98,10 @@ class Node:
             # Check Uplink
             if not self.current_uplink_mac:
                 self.ui.log("Scanning for Uplink...")
-                best = self.uplink_selector.select_best_uplink()
+                best, candidates = self.uplink_selector.select_best_uplink()
+                if candidates:
+                    self.scan_results = candidates
+                    self.ui.update_scan_results(candidates)
                 if best:
                     self._connect_uplink(best)
             

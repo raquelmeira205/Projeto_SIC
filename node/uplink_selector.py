@@ -17,7 +17,7 @@ class UplinkSelector:
         valid_candidates = [c for c in candidates if c['hop_count'] >= 0]
         
         if not valid_candidates:
-            return None
+            return None, candidates
 
         # Sort by:
         # 1. Hop Count (Low is better)
@@ -37,4 +37,4 @@ class UplinkSelector:
         best = min(valid_candidates, key=lambda c: (c['hop_count'], -c['rssi']))
         
         logging.info(f"Selected Uplink: {best['name']} ({best['mac']}) Hop={best['hop_count']} RSSI={best['rssi']}")
-        return best # Returns the info dict containing 'peripheral' object
+        return best, candidates # Returns (best, all raw candidates)

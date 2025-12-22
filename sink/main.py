@@ -37,13 +37,13 @@ class SinkConnectionManager:
             advertising_type='peripheral'
         )
 
-        # Optional but useful for debugging
-        self.advertisement.add_local_name("SIC-Sink")
+        # NOTE: LocalName removed to stay within 31-byte BLE advertising limit
+        # With manufacturer data (17 bytes) + overhead, we're at the limit
 
         # Manufacturer Data:
         # [ hop_count (1 byte) | sink_nid (N bytes) ]
         manuf_payload = bytes([0]) + self.sink_nid
-        print(f"[DEBUG] Setting manufacturer data: ID=0xFFFE ({0xFFFE}), payload={manuf_payload.hex()}")
+        print(f"[DEBUG] Setting manufacturer data: ID=0xFFFE ({0xFFFE}), payload={manuf_payload.hex()} ({len(manuf_payload)} bytes)")
         self.advertisement.add_manufacturer_data(0xFFFE, manuf_payload)
 
         # REQUIRED FIX

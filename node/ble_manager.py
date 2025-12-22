@@ -136,25 +136,52 @@ class BLEManager:
     # ------------------------------------------------------------------
 
     def scan_for_devices(self):
-        """Manual scan for nearby devices without connecting"""
-        print("\n--- Manual scan for devices ---")
+        """Manual scan for nearby devices without connecting - using simplepyble"""
+        print("\n--- Manual scan for devices (using simplepyble) ---")
         
-        devices = scan_nearby_devices(duration=10)
-        
-        # Return structured list
-        result = []
-        for mac, name, hop, rssi, nid in devices:
-            if hop >= 0:  # Only include valid SIC devices
-                result.append({
-                    'mac': mac,
-                    'name': name,
-                    'hop_count': hop,
-                    'rssi': rssi,
-                    'nid': nid
-                })
-        
-        print(f"[*] Found {len(result)} devices")
-        return result
+        try:
+            from node.ble_discovery import BLEDiscovery
+            
+            scanner = BLEDiscovery('hci0')
+            devices = scanner.scan(duration_ms=10000)  # 10 second scan
+            
+            # Convert to expected format
+            result = []
+            for dev in devices:
+                hop = dev.get('hop_count', -1)
+                if hop >= 0:  # Only include valid SIC devices
+                    result.append({
+                        'mac': dev['mac'],
+                        'name': dev.get('name', 'Unknown'),
+                        'hop_count': hop,
+                        'rssi': dev.get('rssi', 0),
+                        'nid': dev.get('nid')
+                    })
+                    print(f"  Found: {dev['mac']} | Hop:{hop} | RSSI:{dev.get('rssi', 0)}")
+            
+            print(f"[*] Found {len(result)} SIC devices")
+            return result
+            
+        except Exception as e:
+            print(f"[!] SimplePyBLE scan error: {e}")
+            print("[!] Falling back to D-Bus scan...")
+            
+            # Fallback to D-Bus scan
+            devices = scan_nearby_devices(duration=10)
+            
+            result = []
+            for mac, name, hop, rssi, nid in devices:
+                if hop >= 0:
+                    result.append({
+                        'mac': mac,
+                        'name': name,
+                        'hop_count': hop,
+                        'rssi': rssi,
+                        'nid': nid
+                    })
+            
+            print(f"[*] Found {len(result)} devices")
+            return result
 
     def find_and_connect_uplink(self):
         print("\n--- Procurando uplink ---")

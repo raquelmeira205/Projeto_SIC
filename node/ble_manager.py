@@ -44,7 +44,7 @@ class BLEManager:
         if self.advertisement:
             return
 
-        # print(f"[*] Advertising (Hop Count={self.hop_count})")
+        print(f"[*] Advertising (Hop Count={self.hop_count})")
 
         self.advertisement = Advertisement(
             BUS,
@@ -105,7 +105,7 @@ class BLEManager:
             return False
 
         try:
-            # print(f"[*] Conectando a {mac}")
+            print(f"[*] Conectando a {mac}")
             device.Connect()
             return True
         except Exception as e:
@@ -134,17 +134,14 @@ class BLEManager:
     # Uplink logic
     # ------------------------------------------------------------------
 
-    def scan(self, duration=5):
-        return scan_nearby_devices(duration=duration)
-        
     def find_and_connect_uplink(self):
-        # print("\n--- Procurando uplink ---")
+        print("\n--- Procurando uplink ---")
 
-        devices = self.scan(duration=10)
+        devices = scan_nearby_devices(duration=10)
         candidates = [d for d in devices if d[2] >= 0]
 
         if not candidates:
-            # print("[!] Nenhum uplink encontrado")
+            print("[!] Nenhum uplink encontrado")
             return False
 
         # menor hop, melhor RSSI

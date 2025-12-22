@@ -11,7 +11,6 @@ class NodeUI:
         self.logs = []
         self.max_logs = 10
         self.scan_results = []
-        self.selected_index = 0
 
         # Handle Ctrl+C gracefully
         signal.signal(signal.SIGINT, self._handle_sigint)
@@ -60,21 +59,11 @@ class NodeUI:
                     elif key == ord('r'):
                         self.node.reset_stats()
                         self.log("Stats reset")
-                    elif key == curses.KEY_UP:
-                        self.selected_index = max(0, self.selected_index - 1)
-                    elif key == curses.KEY_DOWN:
-                        self.selected_index = min(len(self.scan_results) - 1, self.selected_index + 1)
-                    elif key == 10 or key == 13: # Enter
-                        if 0 <= self.selected_index < len(self.scan_results):
-                            candidate = self.scan_results[self.selected_index]
-                            self.log(f"Selected: {candidate.get('mac')}")
-                            # Connect in a separate thread to not block UI
-                            mac = candidate.get('mac')
-                            hop = candidate.get('hop_count', -1)
-                            threading.Thread(target=self.node.connect_manual, args=(mac, hop), daemon=True).start()
             except Exception as e:
                 with open("ui_error.log", "a") as f:
                     f.write(f"{time.ctime()} UI Error: {e}\n")
+
+            time.sleep(0.05)
 
     def _safe_addstr(self, y, x, msg, *args):
         h, w = self.stdscr.getmaxyx()
@@ -89,7 +78,7 @@ class NodeUI:
                 pass
 
     def _draw(self, stdscr):
-        stdscr.erase()
+        stdscr.clear()
         h, w = stdscr.getmaxyx()
 
         # Header
@@ -117,40 +106,17 @@ class NodeUI:
 
         # Scan Results
         self._safe_addstr(6, 40, "Scan Results:", curses.A_BOLD)
-        
-        # Calculate visual window (max 15 items)
-        max_visible = 15
-        start_idx = 0
-        if self.selected_index >= max_visible:
-            start_idx = self.selected_index - max_visible + 1
-        
-        visible_items = self.scan_results[start_idx : start_idx + max_visible]
-        
         row = 7
-        for i, dev in enumerate(visible_items):
-             real_index = start_idx + i
-             
+        for dev in self.scan_results[:15]: 
              name = dev.get('name')
              mac = dev.get('mac', 'Unknown')
              if not name:
                  name = mac
              hop = dev.get('hop_count', -1)
              rssi = dev.get('rssi', 0)
-             
-             # Highlight selected
-             style = curses.A_NORMAL
-             if real_index == self.selected_index:
-                 style = curses.A_REVERSE
-
              # Show a bit more info: Name (Hop: X, RSSI: Y)
-             self._safe_addstr(row, 40, f"  {name} (Hop:{hop} RSSI:{rssi})", style)
+             self._safe_addstr(row, 40, f"  {name} (Hop:{hop} RSSI:{rssi})")
              row += 1
-             
-        # Scroll indicators
-        if start_idx > 0:
-            self._safe_addstr(6, 60, "^")
-        if start_idx + max_visible < len(self.scan_results):
-            self._safe_addstr(row, 60, "v")
 
         # Logs
         self._safe_addstr(13, 0, "Logs:", curses.A_BOLD)
@@ -161,6 +127,6 @@ class NodeUI:
                 row += 1
 
         # Controls
-        self._safe_addstr(h-1, 0, "[q] Quit [r] Reset Stats [Arrows] Select [Enter] Connect", curses.A_REVERSE)
+        self._safe_addstr(h-1, 0, "[q] Quit  [r] Reset Stats", curses.A_REVERSE)
 
         stdscr.refresh()

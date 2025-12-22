@@ -42,15 +42,14 @@ class Router:
 
         threading.Thread(target=self._monitor_heartbeat_timeout, daemon=True).start()
 
-    def set_uplink(self, connection_handle, hops, session_key=None):
+    def set_uplink(self, connection_handle, hops):
         self.uplink_connection = connection_handle
         self.hops_to_sink = hops + 1
         self.last_heartbeat_time = time.time()
-        # Init security state for uplink
-        if session_key:
-             self.link_keys[connection_handle] = session_key
-        elif connection_handle not in self.link_keys:
-             # Fallback for testing only
+        # Init security state for uplink if not exists
+        if connection_handle not in self.link_keys:
+             # TODO: Integrate with Handshake to set real key. 
+             # For now, using a dummy key or deriving from handshake if available separately
              self.link_keys[connection_handle] = b'DEFAULT_TEST_KEY_1234567890123456'
              self.my_counters[connection_handle] = 0
              self.replay_counters[connection_handle] = 0

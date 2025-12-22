@@ -10,7 +10,7 @@ def find_adapter(bus):
         objects = remote_om.GetManagedObjects()
         for path, interfaces in objects.items():
             if "org.bluez.Adapter1" in interfaces:
-                # print(f"[BLE] Using adapter: {path}")
+                print(f"[BLE] Using adapter: {path}")
                 return path
         print("[!] No bluetooth adapter found. Defaulting to /org/bluez/hci0")
         return "/org/bluez/hci0"
@@ -52,13 +52,13 @@ def get_gatt_characteristic(mac_address, uuid):
         print(f"[!] Característica {uuid} não encontrada em {mac_address}.")
         
         # Enhanced Debugging: List all available characteristics for this device
-        # print(f"[DEBUG] Características disponíveis em {mac_address}:")
-        # for path, interfaces in objects.items():
-        #      if "org.bluez.GattCharacteristic1" in interfaces:
-        #          if path.startswith(device_path):
-        #              props = interfaces["org.bluez.GattCharacteristic1"]
-        #              c_uuid = props.get("UUID")
-        #              print(f"   - {c_uuid} @ {path}")
+        print(f"[DEBUG] Características disponíveis em {mac_address}:")
+        for path, interfaces in objects.items():
+             if "org.bluez.GattCharacteristic1" in interfaces:
+                 if path.startswith(device_path):
+                     props = interfaces["org.bluez.GattCharacteristic1"]
+                     c_uuid = props.get("UUID")
+                     print(f"   - {c_uuid} @ {path}")
 
         return None
     except Exception as e:
@@ -76,7 +76,7 @@ def scan_nearby_devices(duration=10):
         adapter.StartDiscovery()
         discovered_devices_metrics = {}
         
-        # print(f"[*] A iniciar scan D-Bus por {duration}s...") # Feedback visual
+        print(f"[*] A iniciar scan D-Bus por {duration}s...") # Feedback visual
 
         # Esperar e monitorizar o estado
         start_time = time.time()
@@ -94,16 +94,16 @@ def scan_nearby_devices(duration=10):
                     rssi = device_props.get("RSSI", -100)
 
                     # lista de tudo o que aparece
-                    # print(f"[DEBUG] Python viu: {mac} | Nome: {name} | RSSI: {rssi}")
+                    print(f"[DEBUG] Python viu: {mac} | Nome: {name} | RSSI: {rssi}")
                     # ----------------------------------------------------
 
                     hop_count = -1 # Valor padrão, significa 'não conectado ao Sink'
 
                     manufacturer_data = device_props.get("ManufacturerData", {})
                     
-                     # DEBUG: Print raw manufacturer data
-                     # if manufacturer_data:
-                     #     print(f"       [DEBUG-MD] ManufData para {mac}: {manufacturer_data}")
+                    # DEBUG: Print raw manufacturer data
+                    if manufacturer_data:
+                         print(f"       [DEBUG-MD] ManufData para {mac}: {manufacturer_data}")
 
                     CUSTOM_ADV_ID = 0xFFFE
 

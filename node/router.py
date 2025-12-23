@@ -78,10 +78,11 @@ class Router:
              # 1. Unpack
             src, dest, mtype, payload, seq, mac = PacketHeader.unpack(packet_data)
 
-            # 2. Security Checks
-            if not self._verify_security(incoming_conn, packet_data, seq, mac):
-                print(f"[!] Falha de segurança no pacote de {incoming_conn}")
-                return
+            # 2. Security Checks (skip MAC verification for HEARTBEAT - uses signature instead)
+            if mtype != MsgType.HEARTBEAT:
+                if not self._verify_security(incoming_conn, packet_data, seq, mac):
+                    print(f"[!] Falha de segurança no pacote de {incoming_conn}")
+                    return
 
             if incoming_conn and src != self.my_nid:
                 if self.forwarding_table.get(src) != incoming_conn:

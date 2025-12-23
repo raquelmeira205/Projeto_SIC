@@ -126,11 +126,15 @@ class BLEHandshakeTransport:
         total_length = chunks[0][0]
         expected_chunks = (total_length + 480 - 1) // 480  # Match MAX_CHUNK_SIZE
         
+        print(f"[Handshake-RX-DEBUG] Reassemble: total_length={total_length}, expected_chunks={expected_chunks}, received={len(chunks)}")
+        
         if len(chunks) < expected_chunks:
             return None  # Still waiting for more chunks
         
         # Reassemble
         data = b''.join(chunk[2] for chunk in chunks)
+        
+        print(f"[Handshake-RX-DEBUG] Reassembled {len(data)} bytes, trimming to {total_length}")
         
         # Clear buffer
         self.receive_buffer = []

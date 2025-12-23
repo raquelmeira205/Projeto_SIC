@@ -102,6 +102,7 @@ class BLEManager:
 
     def connect_to_device(self, mac):
         import time
+        from gi.repository import GLib
         
         # Wait for device to appear in D-Bus (from scan)
         max_wait = 5
@@ -123,13 +124,28 @@ class BLEManager:
                 print(f"[*] Já conectado a {mac}")
                 return True
             
-            print(f"[*] Conectando a {mac}")
-            device.Connect()
+            print(f"[*] Conectando a {mac} via BLE...")
+            
+            # Try to connect using the adapter's ConnectDevice method for LE
+            try:
+                adapter = BUS.get("org.bluez", ADAPTER_PATH)
+                # Use ConnectDevice with address type for LE connections
+                properties = {
+                    'Address': GLib.Variant('s', mac),
+                    'AddressType': GLib.Variant('s', 'public')  # Force LE public address
+                }
+                adapter.ConnectDevice(properties)
+                print(f"[*] ConnectDevice chamado para {mac}")
+            except Exception as e:
+                print(f"[!] ConnectDevice falhou, tentando Connect direto: {e}")
+                # Fallback to direct Connect
+                device.Connect()
             
             # Wait for connection to establish
             for i in range(10):
                 time.sleep(0.5)
-                if hasattr(device, 'Connected') and device.Connected:
+                device = get_device_object(mac)  # Refresh device object
+                if device and hasattr(device, 'Connected') and device.Connected:
                     print(f"[*] Conexão estabelecida com {mac}")
                     return True
             

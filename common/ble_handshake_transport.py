@@ -93,8 +93,6 @@ class BLEHandshakeTransport:
         """
         print(f"[Handshake-RX] Waiting to receive data from {self.mac}")
         
-        # Clear any stale chunks from previous messages
-        self.receive_buffer = []
         expected_length = None
         
         # In the actual implementation, the RxCharacteristic will populate
@@ -116,8 +114,8 @@ class BLEHandshakeTransport:
                 data = self._reassemble_chunks_filtered(matching_chunks, expected_length)
                 if data is not None:
                     print(f"[Handshake-RX] Received {len(data)} bytes")
-                    # Clear ALL chunks (including non-matching ones will be handled next time)
-                    self.receive_buffer = []
+                    # Remove only the matching chunks, keep others for next receive()
+                    self.receive_buffer = [c for c in self.receive_buffer if c[0] != expected_length]
                     return data
             time.sleep(0.1)
         

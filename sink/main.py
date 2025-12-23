@@ -104,11 +104,31 @@ class SinkConnectionManager:
     def _send_packet(self, mac, packet):
         # Lógica igual ao Node: obter char e escrever
         try:
+            # First, ensure services are discovered
+            device = get_device_object(mac)
+            if device:
+                # Check if services are resolved
+                try:
+                    if not device.ServicesResolved:
+                        print(f"[Sink] Discovering services for {mac}...")
+                        # Wait a bit for services to be discovered
+                        import time
+                        for i in range(10):  # Wait up to 1 second
+                            time.sleep(0.1)
+                            if device.ServicesResolved:
+                                print(f"[Sink] Services resolved for {mac}")
+                                break
+                except:
+                    pass  # Property might not exist
+            
             char_proxy = get_gatt_characteristic(mac, SIC_RX_CHAR_UUID)
             if char_proxy:
                 char_proxy.WriteValue(packet, {'type': GLib.Variant('s', 'command')})
                 # print(f"[Sink] Enviado para {mac}")
+            else:
+                print(f"[Sink] Failed to get characteristic for {mac}")
         except Exception as e:
+            print(f"[Sink] Error sending to {mac}: {e}")
             pass # Ignorar falhas de envio (best effort)
     
     def perform_handshake(self, peer_mac):

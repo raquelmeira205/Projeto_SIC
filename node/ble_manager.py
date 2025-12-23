@@ -127,6 +127,7 @@ class BLEManager:
             print(f"[*] Conectando a {mac} via BLE...")
             
             # Try to connect using the adapter's ConnectDevice method for LE
+            connection_initiated = False
             try:
                 adapter = BUS.get("org.bluez", ADAPTER_PATH)
                 # Use ConnectDevice with address type for LE connections
@@ -134,22 +135,48 @@ class BLEManager:
                     'Address': GLib.Variant('s', mac),
                     'AddressType': GLib.Variant('s', 'public')  # Force LE public address
                 }
-                adapter.ConnectDevice(properties)
-                print(f"[*] ConnectDevice chamado para {mac}")
+                result = adapter.ConnectDevice(properties)
+                print(f"[*] ConnectDevice retornou: {result}")
+                connection_initiated = True
             except Exception as e:
-                print(f"[!] ConnectDevice falhou, tentando Connect direto: {e}")
-                # Fallback to direct Connect
-                device.Connect()
+                error_msg = str(e)
+                # If it returns an object path, that's actually success!
+                if 'returned type "(o)"' in error_msg or '/org/bluez/' in error_msg:
+                    print(f"[*] ConnectDevice iniciou conexão (object path retornado)")
+                    connection_initiated = True
+                else:
+                    print(f"[!] ConnectDevice falhou: {e}")
+                    # Fallback to direct Connect
+                    try:
+                        device.Connect()
+                        connection_initiated = True
+                    except Exception as e2:
+                        # Check if error is "already in progress" which means connection is happening
+                        if 'InProgress' in str(e2) or 'busy' in str(e2).lower():
+                            print(f"[*] Conexão já em progresso")
+                            connection_initiated = True
+                        else:
+                            print(f"[!] Connect também falhou: {e2}")
+            
+            if not connection_initiated:
+                return False
             
             # Wait for connection to establish
-            for i in range(10):
+            print(f"[*] Aguardando conexão estabelecer...")
+            for i in range(15):  # Increased timeout
                 time.sleep(0.5)
                 device = get_device_object(mac)  # Refresh device object
                 if device and hasattr(device, 'Connected') and device.Connected:
-                    print(f"[*] Conexão estabelecida com {mac}")
+                    print(f"[*] ✓ Conexão estabelecida com {mac}")
                     return True
             
-            print(f"[!] Timeout aguardando conexão com {mac}")
+            print(f"[!] Timeout aguardando conexão, mas pode estar conectado")
+            # Check one last time
+            device = get_device_object(mac)
+            if device and hasattr(device, 'Connected') and device.Connected:
+                print(f"[*] ✓ Conexão confirmada!")
+                return True
+            
             return False
             
         except Exception as e:

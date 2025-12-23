@@ -233,28 +233,39 @@ class RxCharacteristic(Characteristic):
                 chunk_index = int.from_bytes(val_bytes[5:7], 'big')
                 chunk_data = val_bytes[7:]
                 
+                print(f"[Sink-RX-DEBUG] Detected handshake: total={total_length}, chunk={chunk_index}")
+                
+                # If this is the first chunk, start handshake in background FIRST
+                # This registers the transport before we try to route the chunk
+                if chunk_index == 0 and mac not in self.pending_handshakes:
+                    def run_handshake():
+                        try:
+                            self.conn_manager.perform_handshake(mac)
+                        except Exception as e:
+                            print(f"[!] Sink handshake failed with {mac}: {e}")
+                        finally:
+                            if mac in self.pending_handshakes:
+                                del self.pending_handshakes[mac]
+                    
+                    t = threading.Thread(target=run_handshake, daemon=True)
+                    t.start()
+                    self.pending_handshakes[mac] = t
+                    
+                    # Give the thread a moment to register the transport
+                    import time
+                    time.sleep(0.1)
+                
                 # Route to handshake queue
                 if handshake_receive_queue.route_chunk(mac, total_length, chunk_index, chunk_data):
                     print(f"[Sink-RX-Handshake] Chunk {chunk_index} from {mac}")
-                    
-                    # If this is the first chunk, start handshake in background
-                    if chunk_index == 0 and mac not in self.pending_handshakes:
-                        def run_handshake():
-                            try:
-                                self.conn_manager.perform_handshake(mac)
-                            except Exception as e:
-                                print(f"[!] Sink handshake failed with {mac}: {e}")
-                            finally:
-                                if mac in self.pending_handshakes:
-                                    del self.pending_handshakes[mac]
-                        
-                        t = threading.Thread(target=run_handshake, daemon=True)
-                        t.start()
-                        self.pending_handshakes[mac] = t
-                    
                     return
+                else:
+                    print(f"[Sink-RX-DEBUG] Failed to route chunk {chunk_index} - no transport registered")
+                    
             except Exception as e:
                 print(f"[!] Error parsing handshake frame: {e}")
+                import traceback
+                traceback.print_exc()
         
         print(f"[Sink-RX] Recebidos {len(val_bytes)} bytes de {mac}")
         # Aqui processaria os dados recebidos dos nós

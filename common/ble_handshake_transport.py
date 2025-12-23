@@ -93,6 +93,9 @@ class BLEHandshakeTransport:
         """
         print(f"[Handshake-RX] Waiting to receive data from {self.mac}")
         
+        # Clear any stale chunks from previous messages
+        self.receive_buffer = []
+        
         # In the actual implementation, the RxCharacteristic will populate
         # a receive queue that we poll here. For now, we'll implement a 
         # simplified version that expects the router to call set_received_data()

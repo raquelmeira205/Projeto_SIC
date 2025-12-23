@@ -86,6 +86,21 @@ class BLEManager:
             if not self.connect_to_device(dest_mac):
                 return False
 
+        # Wait for services to be discovered
+        try:
+            if not device.ServicesResolved:
+                print(f"[BLE] Waiting for service discovery on {dest_mac}...")
+                import time
+                for i in range(20):  # Wait up to 2 seconds
+                    time.sleep(0.1)
+                    if device.ServicesResolved:
+                        print(f"[BLE] Services resolved for {dest_mac}")
+                        break
+                else:
+                    print(f"[BLE] Warning: Services not resolved for {dest_mac}, attempting anyway...")
+        except:
+            pass  # Property might not exist
+
         char = get_gatt_characteristic(dest_mac, SIC_RX_CHAR_UUID)
         if not char:
             return False

@@ -329,7 +329,7 @@ def main():
     security = RealSecurity(args.key)
     
     # 3. Heartbeat Service
-    hb_service = HeartbeatService(sink_nid, conn_manager, security)
+    hb_service = HeartbeatService(sink_nid, conn_manager)
     
     # 4. GATT Server (Receive Data)
     app = SinkApplication(BUS, conn_manager)

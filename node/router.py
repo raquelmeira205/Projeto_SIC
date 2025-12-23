@@ -139,16 +139,21 @@ class Router:
         if self.sink_nid != src_nid:
              self.sink_nid = src_nid
 
-        seq, sig = HeartbeatPayload.unpack(payload)
-
-        if not self.security.verify_sink_signature(seq.to_bytes(4, 'big'), sig):
+        # Payload is now just the sequence number (4 bytes)
+        # Security verification (MAC) is already done in _verify_security()
+        if len(payload) < 4:
+            print(f"[!] Invalid heartbeat payload length: {len(payload)}")
             return
+            
+        seq = int.from_bytes(payload[:4], 'big')
 
         if seq <= self.last_heartbeat_seq:
             return
 
         self.last_heartbeat_seq = seq
         self.last_heartbeat_time = time.time()
+        
+        print(f"[Heartbeat] Received #{seq} from Sink")
 
         # Re-encapsulate heartbeat for downlinks
         # NOTE: Header MAC is 0x00*16 for addr? No, src/dest are just headers.

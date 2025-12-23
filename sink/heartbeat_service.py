@@ -1,7 +1,7 @@
 import time
 import threading
 from common.packet_structs import PacketHeader, MsgType, HeartbeatPayload
-from common.security import compute_mac
+from common.crypto_utils import generate_mac
 
 class HeartbeatService:
     def __init__(self, sink_nid, connection_manager):
@@ -37,7 +37,7 @@ class HeartbeatService:
                     )
                     
                     # Compute MAC using session key
-                    mac_value = compute_mac(session_key, packet)
+                    mac_value = generate_mac(session_key, packet)
                     
                     # Recreate packet with actual MAC
                     packet = PacketHeader.pack(

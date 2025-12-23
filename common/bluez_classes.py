@@ -62,11 +62,16 @@ class Advertisement(object):
         self.appearance = None
         self.include_tx_power = False
         
-        # Make advertisement discoverable and connectable
-        self.discoverable = True
-        self.discoverable_timeout = 0  # 0 = no timeout
+        # Discoverable properties (optional, only for Sink)
+        self._discoverable = None  # None = not set, don't expose property
+        self._discoverable_timeout = None
 
         self.registration = None
+    
+    def set_discoverable(self, discoverable=True, timeout=0):
+        """Enable discoverable mode (for Sink)."""
+        self._discoverable = discoverable
+        self._discoverable_timeout = timeout
 
     # ---------------------------------------------------------------------
     # Helpers
@@ -125,15 +130,27 @@ class Advertisement(object):
 
     @property
     def Includes(self):
-        return ["tx-power"] if self.include_tx_power else []
+        includes = []
+        if self.include_tx_power:
+            includes.append("tx-power")
+        # Only include discoverable properties if explicitly set
+        if self._discoverable is not None:
+            includes.append("discoverable")
+        return includes
     
     @property
     def Discoverable(self):
-        return self.discoverable
+        # Only expose if explicitly set
+        if self._discoverable is None:
+            raise AttributeError("Discoverable not set")
+        return self._discoverable
     
     @property
     def DiscoverableTimeout(self):
-        return self.discoverable_timeout
+        # Only expose if explicitly set
+        if self._discoverable_timeout is None:
+            raise AttributeError("DiscoverableTimeout not set")
+        return self._discoverable_timeout
 
     # ---------------------------------------------------------------------
     # Lifecycle

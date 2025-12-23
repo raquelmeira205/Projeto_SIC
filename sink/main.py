@@ -66,6 +66,9 @@ class SinkConnectionManager:
             index=0,
             advertising_type='peripheral'
         )
+        
+        # Make Sink advertisement connectable
+        self.advertisement.set_discoverable(True, 0)
 
         # NOTE: LocalName removed to stay within 31-byte BLE advertising limit
         # With manufacturer data (17 bytes) + overhead, we're at the limit

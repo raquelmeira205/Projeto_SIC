@@ -223,6 +223,9 @@ class RxCharacteristic(Characteristic):
         if device_path and "dev_" in device_path:
             mac = device_path.split("dev_")[1].replace("_", ":")
         
+        # Debug: Show first bytes
+        print(f"[Sink-RX-DEBUG] {len(val_bytes)} bytes from {mac}, first 10 bytes: {val_bytes[:10].hex()}")
+        
         # Check if this is handshake data (starts with 0xFF marker)
         if len(val_bytes) >= 7 and val_bytes[0] == 0xFF:
             try:

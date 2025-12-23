@@ -42,8 +42,6 @@ class Advertisement(object):
             <property name="LocalName" type="s" access="read"/>
             <property name="Appearance" type="q" access="read"/>
             <property name="Includes" type="as" access="read"/>
-            <property name="Discoverable" type="b" access="read"/>
-            <property name="DiscoverableTimeout" type="q" access="read"/>
         </interface>
     </node>
     """
@@ -133,24 +131,17 @@ class Advertisement(object):
         includes = []
         if self.include_tx_power:
             includes.append("tx-power")
-        # Only include discoverable properties if explicitly set
-        if self._discoverable is not None:
-            includes.append("discoverable")
         return includes
     
     @property
     def Discoverable(self):
-        # Only expose if explicitly set
-        if self._discoverable is None:
-            raise AttributeError("Discoverable not set")
-        return self._discoverable
+        # Return False if not explicitly set (for Sink only)
+        return self._discoverable if self._discoverable is not None else False
     
     @property
     def DiscoverableTimeout(self):
-        # Only expose if explicitly set
-        if self._discoverable_timeout is None:
-            raise AttributeError("DiscoverableTimeout not set")
-        return self._discoverable_timeout
+        # Return 0 if not explicitly set
+        return self._discoverable_timeout if self._discoverable_timeout is not None else 0
 
     # ---------------------------------------------------------------------
     # Lifecycle

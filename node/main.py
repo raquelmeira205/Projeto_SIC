@@ -10,14 +10,38 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from common.bluez_classes import Application, Service, Characteristic
 from common.ble_utils import BUS, SIC_SERVICE_UUID, SIC_RX_CHAR_UUID
 from common.pki_utils import read_nid_from_cert
+from common.ble_handshake_transport import handshake_receive_queue
 from node.ble_manager import BLEManager
 from node.router import Router
 from node.cli_ui import NodeCLI
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives import hashes
 
 
-class MockSecurity:
-    def verify_sink_signature(self, data, sig):
-        return True
+class RealSecurity:
+    """Real security module that verifies Sink signatures."""
+    
+    def __init__(self, sink_cert_path):
+        """Load Sink certificate for signature verification."""
+        with open(sink_cert_path, 'rb') as f:
+            self.sink_cert = x509.load_pem_x509_certificate(f.read(), default_backend())
+        self.sink_public_key = self.sink_cert.public_key()
+        print(f"[Security] Sink certificate loaded: {sink_cert_path}")
+    
+    def verify_sink_signature(self, data, signature):
+        """Verify signature from Sink using its public key."""
+        try:
+            self.sink_public_key.verify(
+                signature,
+                data,
+                ec.ECDSA(hashes.SHA512())
+            )
+            return True
+        except Exception as e:
+            print(f"[!] Signature verification failed: {e}")
+            return False
 
 
 class RxCharacteristic(Characteristic):
@@ -33,6 +57,20 @@ class RxCharacteristic(Characteristic):
         if device_path and "dev_" in device_path:
             mac = device_path.split("dev_")[1].replace("_", ":")
 
+        # Check if this is handshake data (framed with length + index)
+        if len(data) >= 6:
+            try:
+                total_length = int.from_bytes(data[0:4], 'big')
+                chunk_index = int.from_bytes(data[4:6], 'big')
+                chunk_data = data[6:]
+                
+                # Route to handshake queue if it's a handshake message
+                if handshake_receive_queue.route_chunk(mac, total_length, chunk_index, chunk_data):
+                    # This was a handshake message, don't process as regular packet
+                    return
+            except:
+                pass  # Not handshake data, process normally
+        
         print(f"[RX] {len(data)} bytes de {mac}")
         self.router.process_incoming_packet(data, mac)
 
@@ -61,15 +99,22 @@ class NodeApplication(Application):
 
 
 class Node:
-    def __init__(self, nid):
+    def __init__(self, nid, cert_path, key_path, ca_cert_path, sink_cert_path):
         print(f"[*] Node iniciado: {nid.hex()}")
 
         # Guardar o NID também no Node para a UI
         self.node_nid = nid  
 
         self.ble_manager = BLEManager(nid)
-        self.security = MockSecurity()
-        self.router = Router(nid, self.security, self.ble_manager)
+        self.security = RealSecurity(sink_cert_path)
+        self.router = Router(
+            nid, 
+            self.security, 
+            self.ble_manager,
+            cert_path=cert_path,
+            key_path=key_path,
+            ca_cert_path=ca_cert_path
+        )
 
         self.ble_manager.set_router_callbacks(
             self.router.set_uplink,
@@ -140,17 +185,26 @@ class Node:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--cert", default="certs/nodeA.crt")
+    parser.add_argument("--cert", default="certs/nodeA.crt", help="Node certificate path")
+    parser.add_argument("--key", default="certs/nodeA.key", help="Node private key path")
+    parser.add_argument("--ca", default="certs/ca.crt", help="CA certificate path")
+    parser.add_argument("--sink-cert", default="certs/sink.crt", help="Sink certificate path")
     args = parser.parse_args()
 
     nid = read_nid_from_cert(args.cert)
     if not nid:
         sys.exit(1)
+    
+    # Verify all certificate files exist
+    for path in [args.cert, args.key, args.ca, args.sink_cert]:
+        if not os.path.exists(path):
+            print(f"[!] File not found: {path}")
+            sys.exit(1)
 
     loop = GLib.MainLoop()
     threading.Thread(target=loop.run, daemon=True).start()
 
-    node = Node(nid)
+    node = Node(nid, args.cert, args.key, args.ca, args.sink_cert)
     node.start_logic_loop()
 
     # Start CLI interface

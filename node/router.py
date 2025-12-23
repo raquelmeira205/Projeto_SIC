@@ -2,17 +2,24 @@ import time
 import threading
 from common.packet_structs import PacketHeader, MsgType, HeartbeatPayload
 from common.crypto_utils import generate_mac, verify_mac
+from common.security_handshake import SecurityHandshake
+from common.ble_handshake_transport import BLEHandshakeTransport, handshake_receive_queue
 
 HEARTBEAT_INTERVAL = 5.0
 MAX_MISSED = 3
 TIMEOUT_LIMIT = HEARTBEAT_INTERVAL * MAX_MISSED
 
 class Router:
-    def __init__(self, my_nid, security_module, ble_manager, app_layer=None):
+    def __init__(self, my_nid, security_module, ble_manager, app_layer=None, cert_path=None, key_path=None, ca_cert_path=None):
         self.my_nid = my_nid
         self.security = security_module
         self.ble = ble_manager
         self.app_layer = app_layer
+        
+        # Certificate paths for handshake
+        self.cert_path = cert_path
+        self.key_path = key_path
+        self.ca_cert_path = ca_cert_path
 
         self.forwarding_table = {}
         self.uplink_connection = None
@@ -48,11 +55,18 @@ class Router:
         self.last_heartbeat_time = time.time()
         # Init security state for uplink if not exists
         if connection_handle not in self.link_keys:
-             # TODO: Integrate with Handshake to set real key. 
-             # For now, using a dummy key or deriving from handshake if available separately
-             self.link_keys[connection_handle] = b'DEFAULT_TEST_KEY_1234567890123456'
-             self.my_counters[connection_handle] = 0
-             self.replay_counters[connection_handle] = 0
+             # Perform handshake to establish session key
+             try:
+                 session_key = self.perform_handshake(connection_handle, is_initiator=True)
+                 self.link_keys[connection_handle] = session_key
+                 self.my_counters[connection_handle] = 0
+                 self.replay_counters[connection_handle] = 0
+                 print(f"[Router] Handshake com uplink {connection_handle} concluído")
+             except Exception as e:
+                 print(f"[!] Handshake falhou com {connection_handle}: {e}")
+                 # Disconnect on handshake failure
+                 self.ble.disconnect_from_device(connection_handle)
+                 raise
 
     def send_app_data(self, dest_nid, payload):
         # Delegate directly to route_data, which handles packet creation
@@ -89,7 +103,10 @@ class Router:
             return True
             
         # 1. Retrieve Key
-        key = self.link_keys.get(conn, b'DEFAULT_TEST_KEY_1234567890123456')
+        if conn not in self.link_keys:
+            print(f"[!] Sem chave de sessão para {conn} - handshake não realizado")
+            return False
+        key = self.link_keys[conn]
         
         # 2. Reconstruct Header with Zero MAC for verification
         # Necessitamos de reconstruir o cabeçalho exato usado para gerar o MAC
@@ -183,8 +200,8 @@ class Router:
 
     def _send_authenticated_packet(self, conn, src, dest, msg_type, payload):
         if conn not in self.link_keys:
-             self.link_keys[conn] = b'DEFAULT_TEST_KEY_1234567890123456'
-             self.my_counters[conn] = 0
+             print(f"[!] Sem chave de sessão para {conn} - não é possível enviar")
+             return False
              
         key = self.link_keys[conn]
         self.my_counters[conn] += 1
@@ -200,3 +217,46 @@ class Router:
         final_packet = PacketHeader.pack(src, dest, msg_type, payload, seq, mac)
         
         return self.ble.send_packet(conn, final_packet)
+    
+    def perform_handshake(self, connection_mac, is_initiator=True):
+        """
+        Perform security handshake with a peer device.
+        
+        Args:
+            connection_mac: MAC address of the peer
+            is_initiator: True if we initiate the handshake
+            
+        Returns:
+            bytes: 32-byte session key
+            
+        Raises:
+            Exception if handshake fails
+        """
+        if not all([self.cert_path, self.key_path, self.ca_cert_path]):
+            raise RuntimeError("Certificate paths not configured for handshake")
+        
+        print(f"[Handshake] Iniciando handshake com {connection_mac} (initiator={is_initiator})")
+        
+        # Create transport
+        transport = BLEHandshakeTransport(connection_mac, is_initiator=is_initiator)
+        handshake_receive_queue.register_transport(connection_mac, transport)
+        
+        try:
+            # Create handshake instance
+            handshake = SecurityHandshake(self.cert_path, self.key_path, self.ca_cert_path)
+            
+            # Perform handshake
+            handshake.perform_handshake(transport)
+            
+            # Get session key
+            session_key = handshake.session_key
+            
+            if not session_key or len(session_key) != 32:
+                raise RuntimeError("Invalid session key derived")
+            
+            print(f"[Handshake] Concluído com {connection_mac}: {session_key[:8].hex()}...")
+            
+            return session_key
+            
+        finally:
+            handshake_receive_queue.unregister_transport(connection_mac)

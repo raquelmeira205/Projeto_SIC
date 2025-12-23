@@ -95,6 +95,7 @@ class BLEHandshakeTransport:
         
         # Clear any stale chunks from previous messages
         self.receive_buffer = []
+        expected_length = None
         
         # In the actual implementation, the RxCharacteristic will populate
         # a receive queue that we poll here. For now, we'll implement a 
@@ -103,14 +104,56 @@ class BLEHandshakeTransport:
         start_time = time.time()
         while time.time() - start_time < self.timeout:
             if self.receive_buffer:
-                # Reassemble chunks
-                data = self._reassemble_chunks()
+                # Get expected length from first chunk
+                if expected_length is None and self.receive_buffer:
+                    expected_length = self.receive_buffer[0][0]
+                    print(f"[Handshake-RX-DEBUG] Expecting message of {expected_length} bytes")
+                
+                # Filter out chunks that don't match this message
+                matching_chunks = [c for c in self.receive_buffer if c[0] == expected_length]
+                
+                # Reassemble chunks for this message only
+                data = self._reassemble_chunks_filtered(matching_chunks, expected_length)
                 if data is not None:
                     print(f"[Handshake-RX] Received {len(data)} bytes")
+                    # Clear ALL chunks (including non-matching ones will be handled next time)
+                    self.receive_buffer = []
                     return data
             time.sleep(0.1)
         
         raise TimeoutError(f"Timeout waiting for data from {self.mac}")
+    
+    def _reassemble_chunks_filtered(self, chunks, expected_length):
+        """
+        Reassemble chunks for a specific message length.
+        
+        Args:
+            chunks: List of chunks with matching total_length
+            expected_length: The expected total length
+            
+        Returns:
+            bytes if complete message received, None otherwise
+        """
+        if not chunks:
+            return None
+        
+        # Sort chunks by index
+        chunks = sorted(chunks, key=lambda x: x[1])
+        
+        # Check if we have all chunks
+        expected_chunks = (expected_length + 480 - 1) // 480
+        
+        print(f"[Handshake-RX-DEBUG] Reassemble: total_length={expected_length}, expected_chunks={expected_chunks}, received={len(chunks)}")
+        
+        if len(chunks) < expected_chunks:
+            return None  # Still waiting for more chunks
+        
+        # Reassemble
+        data = b''.join(chunk[2] for chunk in chunks)
+        
+        print(f"[Handshake-RX-DEBUG] Reassembled {len(data)} bytes, trimming to {expected_length}")
+        
+        return data[:expected_length]  # Trim to exact length
     
     def _reassemble_chunks(self):
         """

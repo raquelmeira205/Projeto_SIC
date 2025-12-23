@@ -42,6 +42,8 @@ class Advertisement(object):
             <property name="LocalName" type="s" access="read"/>
             <property name="Appearance" type="q" access="read"/>
             <property name="Includes" type="as" access="read"/>
+            <property name="Discoverable" type="b" access="read"/>
+            <property name="DiscoverableTimeout" type="q" access="read"/>
         </interface>
     </node>
     """
@@ -59,6 +61,10 @@ class Advertisement(object):
         self.local_name = None
         self.appearance = None
         self.include_tx_power = False
+        
+        # Make advertisement discoverable and connectable
+        self.discoverable = True
+        self.discoverable_timeout = 0  # 0 = no timeout
 
         self.registration = None
 
@@ -120,6 +126,14 @@ class Advertisement(object):
     @property
     def Includes(self):
         return ["tx-power"] if self.include_tx_power else []
+    
+    @property
+    def Discoverable(self):
+        return self.discoverable
+    
+    @property
+    def DiscoverableTimeout(self):
+        return self.discoverable_timeout
 
     # ---------------------------------------------------------------------
     # Lifecycle

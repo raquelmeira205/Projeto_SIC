@@ -18,33 +18,26 @@ class BLEHandshakeTransport:
     send() and receive() methods required by SecurityHandshake.
     """
     
-    def __init__(self, mac_address, is_initiator=True, timeout=10.0):
+    def __init__(self, mac_address, ble_manager, is_initiator=True, timeout=10.0):
         """
         Initialize BLE handshake transport.
         
         Args:
             mac_address: MAC address of the peer device
+            ble_manager: BLEManager instance for sending packets
             is_initiator: True if this side initiates the handshake
             timeout: Timeout in seconds for receive operations
         """
         self.mac = mac_address
+        self.ble_manager = ble_manager
         self.is_initiator = is_initiator
         self.timeout = timeout
-        self.rx_char = None
         self.receive_buffer = []
         self.receive_complete = False
         
-    def _get_characteristic(self):
-        """Get the GATT characteristic for communication."""
-        if not self.rx_char:
-            self.rx_char = get_gatt_characteristic(self.mac, SIC_RX_CHAR_UUID)
-            if not self.rx_char:
-                raise RuntimeError(f"Failed to get GATT characteristic for {self.mac}")
-        return self.rx_char
-    
     def send(self, data):
         """
-        Send data over BLE GATT characteristic.
+        Send data over BLE using the BLE manager's send_packet method.
         
         Args:
             data: bytes to send
@@ -52,14 +45,12 @@ class BLEHandshakeTransport:
         if not isinstance(data, bytes):
             raise TypeError("Data must be bytes")
         
-        char = self._get_characteristic()
-        
         # BLE GATT has MTU limitations (typically 512 bytes max)
         # For handshake, we need to send certificates and keys which can be large
         # We'll chunk the data with a simple framing protocol:
-        # [total_length (4 bytes)][chunk_index (2 bytes)][chunk_data]
+        # [0xFF (handshake marker)][total_length (4 bytes)][chunk_index (2 bytes)][chunk_data]
         
-        MAX_CHUNK_SIZE = 500  # Conservative chunk size
+        MAX_CHUNK_SIZE = 480  # Conservative chunk size to leave room for framing
         total_length = len(data)
         num_chunks = (total_length + MAX_CHUNK_SIZE - 1) // MAX_CHUNK_SIZE
         
@@ -70,18 +61,20 @@ class BLEHandshakeTransport:
             end = min(start + MAX_CHUNK_SIZE, total_length)
             chunk_data = data[start:end]
             
-            # Frame: [total_length][chunk_index][chunk_data]
+            # Frame: [0xFF marker][total_length][chunk_index][chunk_data]
             frame = (
+                b'\xFF' +  # Handshake marker to distinguish from regular packets
                 total_length.to_bytes(4, 'big') +
                 i.to_bytes(2, 'big') +
                 chunk_data
             )
             
-            try:
-                char.WriteValue(list(frame), {'type': GLib.Variant('s', 'command')})
-                time.sleep(0.05)  # Small delay between chunks
-            except Exception as e:
-                raise RuntimeError(f"Failed to send chunk {i}/{num_chunks}: {e}")
+            # Use BLE manager to send the packet
+            success = self.ble_manager.send_packet(self.mac, frame)
+            if not success:
+                raise RuntimeError(f"Failed to send chunk {i}/{num_chunks}")
+            
+            time.sleep(0.05)  # Small delay between chunks
         
         print(f"[Handshake-TX] Sent {num_chunks} chunks successfully")
     
@@ -131,7 +124,7 @@ class BLEHandshakeTransport:
         
         # Check if we have all chunks
         total_length = chunks[0][0]
-        expected_chunks = (total_length + 500 - 1) // 500
+        expected_chunks = (total_length + 480 - 1) // 480  # Match MAX_CHUNK_SIZE
         
         if len(chunks) < expected_chunks:
             return None  # Still waiting for more chunks

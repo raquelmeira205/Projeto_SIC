@@ -57,18 +57,20 @@ class RxCharacteristic(Characteristic):
         if device_path and "dev_" in device_path:
             mac = device_path.split("dev_")[1].replace("_", ":")
 
-        # Check if this is handshake data (framed with length + index)
-        if len(data) >= 6:
+        # Check if this is handshake data (starts with 0xFF marker)
+        if len(data) >= 7 and data[0] == 0xFF:
             try:
-                total_length = int.from_bytes(data[0:4], 'big')
-                chunk_index = int.from_bytes(data[4:6], 'big')
-                chunk_data = data[6:]
+                total_length = int.from_bytes(data[1:5], 'big')
+                chunk_index = int.from_bytes(data[5:7], 'big')
+                chunk_data = data[7:]
                 
                 # Route to handshake queue if it's a handshake message
                 if handshake_receive_queue.route_chunk(mac, total_length, chunk_index, chunk_data):
                     # This was a handshake message, don't process as regular packet
+                    print(f"[RX-Handshake] Chunk {chunk_index} from {mac}")
                     return
-            except:
+            except Exception as e:
+                print(f"[!] Error parsing handshake frame: {e}")
                 pass  # Not handshake data, process normally
         
         print(f"[RX] {len(data)} bytes de {mac}")

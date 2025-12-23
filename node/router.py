@@ -237,8 +237,8 @@ class Router:
         
         print(f"[Handshake] Iniciando handshake com {connection_mac} (initiator={is_initiator})")
         
-        # Create transport
-        transport = BLEHandshakeTransport(connection_mac, is_initiator=is_initiator)
+        # Create transport with BLE manager
+        transport = BLEHandshakeTransport(connection_mac, self.ble, is_initiator=is_initiator)
         handshake_receive_queue.register_transport(connection_mac, transport)
         
         try:

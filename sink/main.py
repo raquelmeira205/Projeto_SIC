@@ -61,6 +61,13 @@ class SinkConnectionManager:
         self.session_keys = {}  # mac -> session_key
         # Replay counters for connected nodes
         self.replay_counters = {} # mac -> last_seen_sequence_number
+        
+        # Characteristic cache to avoid repeated lookups
+        self.char_cache = {}  # mac -> characteristic proxy
+        
+        # Track which devices we've already checked for services
+        self.services_checked = set()  # set of MACs
+
 
 
     def start_advertising(self):
@@ -109,30 +116,50 @@ class SinkConnectionManager:
     def _send_packet(self, mac, packet):
         # Lógica igual ao Node: obter char e escrever
         try:
-            # First, ensure services are discovered
-            device = get_device_object(mac)
-            if device:
-                # Check if services are resolved
-                try:
-                    if not device.ServicesResolved:
-                        print(f"[Sink] Discovering services for {mac}...")
-                        # Wait a bit for services to be discovered
-                        import time
-                        for i in range(10):  # Wait up to 1 second
-                            time.sleep(0.1)
-                            if device.ServicesResolved:
-                                print(f"[Sink] Services resolved for {mac}")
-                                break
-                except:
-                    pass  # Property might not exist
+            # Check if we have cached characteristic
+            char_proxy = self.char_cache.get(mac)
             
-            char_proxy = get_gatt_characteristic(mac, SIC_RX_CHAR_UUID)
-            if char_proxy:
-                char_proxy.WriteValue(packet, {'type': GLib.Variant('s', 'command')})
-                # print(f"[Sink] Enviado para {mac}")
-            else:
-                print(f"[Sink] Failed to get characteristic for {mac}")
+            if not char_proxy:
+                # First time sending to this device - check services
+                if mac not in self.services_checked:
+                    device = get_device_object(mac)
+                    if device:
+                        # Check if services are resolved
+                        try:
+                            if not device.ServicesResolved:
+                                print(f"[Sink] Discovering services for {mac}...")
+                                # Wait a bit for services to be discovered
+                                import time
+                                for i in range(10):  # Wait up to 1 second
+                                    time.sleep(0.1)
+                                    device = get_device_object(mac)  # Refresh
+                                    if device and device.ServicesResolved:
+                                        print(f"[Sink] Services resolved for {mac}")
+                                        break
+                        except:
+                            pass  # Property might not exist
+                    
+                    self.services_checked.add(mac)
+                
+                # Try to get characteristic
+                char_proxy = get_gatt_characteristic(mac, SIC_RX_CHAR_UUID)
+                if char_proxy:
+                    self.char_cache[mac] = char_proxy
+                else:
+                    # Don't spam - only log once per device
+                    if mac not in self.char_cache:
+                        print(f"[Sink] Failed to get characteristic for {mac}")
+                    return
+            
+            # Send packet
+            char_proxy.WriteValue(packet, {'type': GLib.Variant('s', 'command')})
+            
         except Exception as e:
+            # Clear cache on error so we retry next time
+            if mac in self.char_cache:
+                del self.char_cache[mac]
+            if mac in self.services_checked:
+                self.services_checked.remove(mac)
             print(f"[Sink] Error sending to {mac}: {e}")
             pass # Ignorar falhas de envio (best effort)
     

@@ -133,8 +133,24 @@ class Router:
         return True
 
     def _handle_heartbeat(self, payload, incoming_conn, src_nid):
-        if incoming_conn != self.uplink_connection:
+        # If we have an uplink, only accept heartbeats from it
+        # If we don't have an uplink but receive a valid heartbeat from a connection
+        # with an established session key, automatically set it as uplink
+        if self.uplink_connection and incoming_conn != self.uplink_connection:
             return
+        
+        # If no uplink but we have a session key with this connection, set it as uplink
+        if not self.uplink_connection and incoming_conn in self.link_keys:
+            print(f"[Router] Auto-setting {incoming_conn} as uplink (received heartbeat)")
+            self.uplink_connection = incoming_conn
+            self.last_heartbeat_time = time.time()
+            # Also update BLE manager's uplink tracking
+            self.ble.uplink_addr = incoming_conn
+            self.ble.uplink_nid = src_nid
+            # Hop count will be set to 1 (connected to Sink with hop=0)
+            self.ble.hop_count = 1
+            self.hops_to_sink = 1
+            self.ble.update_advertisement()
 
         # Capturar Sink NID
         if self.sink_nid != src_nid:

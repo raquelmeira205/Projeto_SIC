@@ -256,10 +256,10 @@ No CLI do Node:
 - [ ] **Network Control para Simulação**
   - Adicionar controlo para simular perda de heartbeats
   - Permitir teste de resiliência em links específicos
-- [ ] **Completar Informação da UI**
-  - Mostrar lista de downlinks e seus NIDs
-  - Display do contador de heartbeats perdidos
-  - Mostrar contador de mensagens roteadas
+- [x] ~~**Completar Informação da UI**~~
+  - ~~Mostrar lista de downlinks e seus NIDs~~
+  - ~~Display do contador de heartbeats perdidos~~
+  - ~~Mostrar contador de mensagens roteadas~~
 
 #### 🟢 EXTRAS
 - [ ] **Suporte a Múltiplos Sinks**

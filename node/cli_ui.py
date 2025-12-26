@@ -35,7 +35,15 @@ class NodeCLI:
         """Print a one-line status update"""
         uplink = self.node.ble_manager.uplink_addr
         hop = self.node.ble_manager.hop_count
-        status = f"Connected to {uplink} (Hop:{hop})" if uplink else "Disconnected"
+        downlinks = len(self.node.router.downlink_connections)
+        lost_hb = self.node.router.stats['lost_heartbeats']
+        routed = self.node.router.stats['routed_messages']
+        
+        if uplink:
+            status = f"UP:{uplink[:8]}... Hop:{hop} DL:{downlinks} LostHB:{lost_hb} Routed:{routed}"
+        else:
+            status = f"Disconnected | LostHB:{lost_hb} Routed:{routed}"
+        
         print(f"\n[STATUS] {status}")
         print("> ", end="", flush=True)
     
@@ -197,12 +205,33 @@ class NodeCLI:
             print(f"Uplink:       Disconnected")
             print(f"Hop Count:    {hop}")
         
+        # Downlinks
+        downlink_connections = self.node.router.downlink_connections
+        print(f"\nDownlinks:    {len(downlink_connections)} connection(s)")
+        if downlink_connections:
+            for conn_mac in downlink_connections:
+                # Try to find NID from forwarding table
+                nid = "Unknown"
+                for dest_nid, next_hop in self.node.router.forwarding_table.items():
+                    if next_hop == conn_mac:
+                        nid = dest_nid.hex()
+                        break
+                print(f"  - {conn_mac} (NID: {nid})")
+        
         # Sink
         sink_nid = self.node.router.sink_nid
-        print(f"Sink NID:     {sink_nid.hex() if sink_nid else 'Unknown'}")
+        print(f"\nSink NID:     {sink_nid.hex() if sink_nid else 'Unknown'}")
+        
+        # Statistics
+        stats = self.node.router.stats
+        print(f"\n--- Statistics ---")
+        print(f"Lost Heartbeats:  {stats['lost_heartbeats']}")
+        print(f"Routed Messages:  {stats['routed_messages']}")
+        print(f"Received Messages: {len(stats.get('received_messages', []))}")
         
         # Forwarding table
-        print(f"\nForwarding Table: {len(self.node.router.forwarding_table)} entries")
+        print(f"\n--- Forwarding Table ---")
+        print(f"Total Entries: {len(self.node.router.forwarding_table)}")
         for dest, next_hop in list(self.node.router.forwarding_table.items())[:5]:
             print(f"  {dest.hex()} -> {next_hop}")
         
@@ -218,16 +247,39 @@ class NodeCLI:
         print("\n" + "="*60)
         print("STATISTICS")
         print("="*60)
+        
+        # Network Health
+        print("--- Network Health ---")
         print(f"Lost Heartbeats:  {stats['lost_heartbeats']}")
+        uplink = self.node.ble_manager.uplink_addr
+        if uplink:
+            print(f"Uplink Status:    Connected to {uplink}")
+        else:
+            print(f"Uplink Status:    Disconnected")
+        
+        # Message Statistics
+        print(f"\n--- Message Statistics ---")
         print(f"Routed Messages:  {stats['routed_messages']}")
         print(f"Received Messages: {len(stats.get('received_messages', []))}")
+        
+        # Network Topology
+        downlink_count = len(self.node.router.downlink_connections)
+        print(f"\n--- Network Topology ---")
+        print(f"Hop Count:        {self.node.ble_manager.hop_count}")
+        print(f"Downlinks:        {downlink_count}")
+        print(f"Forwarding Table: {len(self.node.router.forwarding_table)} entries")
         
         # Show recent messages
         messages = stats.get('received_messages', [])
         if messages:
-            print("\nRecent Messages:")
+            print("\n--- Recent Messages ---")
             for sender, msg in messages[-5:]:
-                print(f"  [{sender[:16]}...]: {msg}")
+                sender_short = sender[:16] + "..." if len(sender) > 16 else sender
+                msg_preview = msg[:40] + "..." if len(msg) > 40 else msg
+                print(f"  [{sender_short}]: {msg_preview}")
+        else:
+            print("\n--- Recent Messages ---")
+            print("  No messages received yet")
         
         print("="*60 + "\n")
     

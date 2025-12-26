@@ -73,17 +73,6 @@ class NodeDTLSClient:
         if not self.running:
             return
         
-        # Wait for hop-by-hop session key to be established
-        print("[DTLS Client] Waiting for hop-by-hop handshake...")
-        while self.running:
-            uplink_mac = self.router.uplink_connection
-            if uplink_mac and uplink_mac in self.router.session_keys:
-                break
-            time.sleep(0.5)
-        
-        if not self.running:
-            return
-        
         print("[DTLS Client] Network ready, starting DTLS handshake...")
         
         try:

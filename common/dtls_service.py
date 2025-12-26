@@ -2,12 +2,11 @@
 DTLS Service
 
 Manages DTLS sessions for end-to-end encryption between Nodes and Sink.
-Uses the python3-dtls library with certificate-based mutual authentication.
+Uses the wolfssl library with certificate-based mutual authentication.
 """
 
 import socket
-import ssl
-from dtls.wrapper import wrap_client, wrap_server
+import wolfssl
 import threading
 import time
 
@@ -68,32 +67,40 @@ class DTLSService:
     
     def _establish_client_session(self):
         """Establish DTLS session as client (Node side)."""
-        # Create DTLS connection in client mode using python3-dtls
         print("[DTLS] Performing client handshake...")
         
-        self.dtls_session = wrap_client(
+        # Create DTLS context
+        context = wolfssl.SSLContext(wolfssl.PROTOCOL_DTLSv1_2)
+        context.load_cert_chain(certfile=self.cert_path, keyfile=self.key_path)
+        context.load_verify_locations(cafile=self.ca_cert_path)
+        context.verify_mode = wolfssl.CERT_REQUIRED
+        
+        # Wrap transport with DTLS
+        self.dtls_session = context.wrap_socket(
             self.transport,
-            keyfile=self.key_path,
-            certfile=self.cert_path,
-            ca_certs=self.ca_cert_path,
-            cert_reqs=ssl.CERT_REQUIRED,
+            server_side=False,
             do_handshake_on_connect=True
         )
         
         print("[DTLS] Client handshake complete")
-
     
     def _establish_server_session(self):
         """Establish DTLS session as server (Sink side)."""
-        # Create DTLS connection in server mode using python3-dtls
         print("[DTLS] Performing server handshake...")
         
-        self.dtls_session = wrap_server(
+        # Create DTLS context
+        context = wolfssl.SSLContext(
+            wolfssl.PROTOCOL_DTLSv1_2,
+            server_side=True
+        )
+        context.load_cert_chain(certfile=self.cert_path, keyfile=self.key_path)
+        context.load_verify_locations(cafile=self.ca_cert_path)
+        context.verify_mode = wolfssl.CERT_REQUIRED
+        
+        # Wrap transport with DTLS
+        self.dtls_session = context.wrap_socket(
             self.transport,
-            keyfile=self.key_path,
-            certfile=self.cert_path,
-            ca_certs=self.ca_cert_path,
-            cert_reqs=ssl.CERT_REQUIRED,
+            server_side=True,
             do_handshake_on_connect=True
         )
         
@@ -155,7 +162,6 @@ class DTLSService:
         """Close DTLS session."""
         if self.dtls_session:
             try:
-                self.dtls_session.shutdown(socket.SHUT_RDWR)
                 self.dtls_session.close()
             except:
                 pass

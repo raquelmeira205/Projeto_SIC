@@ -5,6 +5,7 @@ class MsgType(IntEnum):
     DATA = 1
     HEARTBEAT = 2
     CONTROL = 3
+    DTLS_HANDSHAKE = 4  # DTLS handshake messages (end-to-end)
 
 NID_SIZE = 16
 

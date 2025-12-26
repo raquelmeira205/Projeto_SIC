@@ -160,7 +160,8 @@ Isto evita que fiquem processos ou conexões empancadas do BlueZ.
 
 #### Tipos de Mensagem
 - **HEARTBEAT**: Beacon periódico do Sink (assinado digitalmente)
-- **DATA**: Dados de aplicação (autenticados via MAC)
+- **DATA**: Dados de aplicação (autenticados via MAC hop-by-hop, cifrados end-to-end com DTLS)
+- **DTLS_HANDSHAKE**: Mensagens de handshake DTLS para estabelecer sessões end-to-end
 
 ### 🔄 Roteamento Multi-Hop
 
@@ -178,6 +179,58 @@ Isto evita que fiquem processos ou conexões empancadas do BlueZ.
 - Sink envia heartbeat com hop=0
 - Cada Node incrementa hop count ao reencaminhar
 - Nodes atualizam seu hop count baseado no uplink
+
+### 🔐 Segurança End-to-End com DTLS
+
+#### Arquitetura de Camadas
+```
+┌─────────────────────────────────────┐
+│   Aplicação (Inbox / Cliente)      │  ← Dados em claro
+├─────────────────────────────────────┤
+│   DTLS Session (End-to-End)        │  ← Cifra/Decifra aqui
+├─────────────────────────────────────┤
+│   Router (Multi-hop)               │  ← Só vê payload opaco
+├─────────────────────────────────────┤
+│   Link Security (Hop-by-Hop)       │  ← MAC por salto
+├─────────────────────────────────────┤
+│   BLE GATT                         │
+└─────────────────────────────────────┘
+```
+
+#### DTLS Handshake
+1. **Node → Sink**: ClientHello
+   - Random (32 bytes)
+   - NID do cliente (16 bytes)
+   - Chave pública ECDH efémera
+
+2. **Sink → Node**: ServerHello
+   - Random (32 bytes)
+   - NID do Sink (16 bytes)
+   - Chave pública ECDH efémera
+   - Certificado X.509 do Sink
+
+3. **Node → Sink**: ClientKeyExchange
+   - Certificado X.509 do Node
+   - Assinatura sobre transcript do handshake
+
+4. **Sink → Node**: Finished
+   - verify_data (HMAC sobre transcript)
+
+5. **Derivação de Chaves**:
+   - ECDH entre chaves efémeras
+   - HKDF para derivar master_secret
+   - HKDF para derivar chaves AES-GCM e IVs
+
+#### Registos DTLS (AES-GCM)
+- **Cifra**: AES-128-GCM
+- **Nonce**: IV_fixo (4 bytes) || epoch (2 bytes) || seq (6 bytes)
+- **AAD**: Cabeçalho DTLS (tipo, versão, epoch, seq, tamanho)
+- **Tag**: 16 bytes de autenticação
+
+#### Anti-Replay DTLS
+- Janela deslizante de 64 bits
+- Baseado em RFC 6347 Section 4.1.2.6
+- Rejeita pacotes duplicados ou muito antigos
 
 ---
 
@@ -235,13 +288,16 @@ No CLI do Node:
 - [x] Uplink auto-restore após reconnection
 - [x] Characteristic caching no Sink (otimização)
 - [x] Inbox Service no Sink com verificação de segurança
+- [x] **DTLS End-to-End Security**
+  - [x] Handshake DTLS com autenticação mútua
+  - [x] Cifra AES-128-GCM para dados de aplicação
+  - [x] Anti-replay com janela deslizante (64 bits)
+  - [x] Derivação de chaves via ECDH + HKDF
+  - [x] Integração com Router (transparente)
 
 ### 📋 Por Fazer (Prioridades)
 
 #### 🔴 CRÍTICO
-- [ ] **Implementar DTLS End-to-End**
-  - Segurança end-to-end entre Nodes e Sink
-  - Proteção de dados em trânsito através de múltiplos hops
 - [ ] **Fix: Sink crash quando Node se desliga**
   - Sink "tripa" quando um Node desconecta abruptamente
   - Implementar gestão robusta de desconexões

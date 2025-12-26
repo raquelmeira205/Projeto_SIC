@@ -46,6 +46,9 @@ class Router:
             "routed_messages": 0,
             "received_messages": [] # List of (sender_nid, msg_bytes)
         }
+        
+        # DTLS Session for end-to-end security with Sink
+        self.dtls_session = None
 
         threading.Thread(target=self._monitor_heartbeat_timeout, daemon=True).start()
 
@@ -68,9 +71,44 @@ class Router:
                  self.ble.disconnect_from_device(connection_handle)
                  raise
 
+    def establish_dtls_session(self):
+        """Establish DTLS session with Sink for end-to-end security"""
+        if not self.sink_nid:
+            raise RuntimeError("Sink NID not known yet (wait for heartbeat)")
+        
+        from node.dtls_client import DtlsSession
+        
+        print("[Router] Establishing DTLS session with Sink...")
+        self.dtls_session = DtlsSession(
+            sink_nid=self.sink_nid,
+            my_nid=self.my_nid,
+            cert_path=self.cert_path,
+            key_path=self.key_path,
+            ca_cert_path=self.ca_cert_path,
+            router=self
+        )
+        
+        # Perform handshake
+        self.dtls_session.perform_handshake()
+        print("[Router] DTLS session established!")
+    
     def send_app_data(self, dest_nid, payload):
-        # Delegate directly to route_data, which handles packet creation
-        self._route_data(self.my_nid, dest_nid, payload)
+        """Send application data (encrypted with DTLS if destination is Sink)"""
+        if dest_nid == self.sink_nid:
+            # End-to-end encryption with DTLS
+            if not self.dtls_session or self.dtls_session.state.value != "ESTABLISHED":
+                print("[!] DTLS session not established. Establishing now...")
+                self.establish_dtls_session()
+            
+            # Encrypt payload with DTLS
+            dtls_record = self.dtls_session.send(payload)
+            
+            # Send DTLS record via Router (hop-by-hop MAC will be applied)
+            self._route_data(self.my_nid, dest_nid, dtls_record)
+        else:
+            # Direct routing (no DTLS for non-Sink destinations)
+            self._route_data(self.my_nid, dest_nid, payload)
+        
         return True
 
     def process_incoming_packet(self, packet_data, incoming_conn):
@@ -92,8 +130,26 @@ class Router:
 
             if mtype == MsgType.HEARTBEAT:
                 self._handle_heartbeat(payload, incoming_conn, src)
+            elif mtype == MsgType.DTLS_HANDSHAKE:
+                # DTLS handshake message - pass to DTLS session
+                if self.dtls_session:
+                    self.dtls_session.handle_handshake_message(payload)
+                else:
+                    print("[!] Received DTLS handshake but no session exists")
             elif mtype == MsgType.DATA:
-                self._route_data(src, dest, payload)
+                # Check if this is DTLS encrypted data from Sink
+                if src == self.sink_nid and self.dtls_session:
+                    try:
+                        # Decrypt DTLS record
+                        plaintext = self.dtls_session.recv(payload)
+                        # Deliver to application layer
+                        if self.app_layer:
+                            self.app_layer.receive(src, plaintext)
+                    except Exception as e:
+                        print(f"[!] DTLS decryption failed: {e}")
+                else:
+                    # Regular routing
+                    self._route_data(src, dest, payload)
 
         except Exception as e:
             print(f"Packet Error: {e}")

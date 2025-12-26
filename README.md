@@ -231,6 +231,10 @@ No CLI do Node:
 - [x] Seleção automática de uplink
 - [x] BLE GATT server/client em Nodes
 - [x] Interface CLI para Nodes
+- [x] SimplePyBLE scanning para descoberta de dispositivos
+- [x] Uplink auto-restore após reconnection
+- [x] Characteristic caching no Sink (otimização)
+- [x] Inbox Service no Sink com verificação de segurança
 
 ### 📋 Por Fazer (Prioridades)
 
@@ -242,12 +246,15 @@ No CLI do Node:
   - Sink "tripa" quando um Node desconecta abruptamente
   - Implementar gestão robusta de desconexões
 - [ ] **Fix: Ver oque se passa com a conexão/handshake as vezes é preciso tentar ligar 4-5 vezes para finalmente funcionar**
+  - Melhorar robustez do handshake inicial
+  - Investigar timing issues no BLE connection establishment
 
 #### 🟠 ALTA
-- [x] **Implementar Inbox Service**
+- [x] ~~**Implementar Inbox Service**~~
   - ~~Criar serviço no Sink para receber mensagens~~
   - ~~Display de mensagens com NID do remetente~~
   - ~~Permitir Nodes enviar mensagens para o Sink~~
+  - ~~Verificação de MAC e replay protection~~
 - [ ] **Verificar Heartbeat Timeout Chain**
   - Confirmar se propagação de timeouts está implementada
   - Testar cascata de desconexões em cadeia

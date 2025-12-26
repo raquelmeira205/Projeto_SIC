@@ -120,15 +120,14 @@ class SinkDTLSServer:
         """
         try:
             message_text = plaintext.decode('utf-8')
-            separator = '=' * 60
-            print(f"\n{separator}")
-            print(f"🔓 DTLS INBOX MESSAGE")
-            print(f"FROM: Node {src_nid.hex()}")
-            print(f"TEXT: {message_text}")
-            print(f"ENCRYPTED: Yes (DTLS end-to-end)")
-            print(f"{separator}\n")
+            print(f\"\\n{'='*60}\")
+            print(f\"🔓 DTLS INBOX MESSAGE\")
+            print(f\"FROM: Node {src_nid.hex()}\")
+            print(f\"TEXT: {message_text}\")
+            print(f\"ENCRYPTED: Yes (DTLS end-to-end)\")
+            print(f\"{'='*60}\\n\")
         except UnicodeDecodeError:
-            print(f"[DTLS Server] Received binary data from {src_nid.hex()}: {plaintext.hex()}")
+            print(f\"[DTLS Server] Received binary data from {src_nid.hex()}: {plaintext.hex()}\")
     
     def send_to_node(self, dest_nid: bytes, plaintext_data: bytes) -> bool:
         """
@@ -143,14 +142,14 @@ class SinkDTLSServer:
         """
         with self.lock:
             if dest_nid not in self.dtls_sessions:
-                print(f"[DTLS Server] No session with {dest_nid.hex()[:8]}...")
+                print(f\"[DTLS Server] No session with {dest_nid.hex()[:8]}...\")
                 return False
             
             try:
                 dtls_service = self.dtls_sessions[dest_nid]
                 return dtls_service.send_secure(plaintext_data)
             except Exception as e:
-                print(f"[DTLS Server] Send error: {e}")
+                print(f\"[DTLS Server] Send error: {e}\")
                 return False
     
     def stop(self):
@@ -159,7 +158,7 @@ class SinkDTLSServer:
         with self.lock:
             for dtls_service in self.dtls_sessions.values():
                 dtls_service.close()
-        print("[DTLS Server] Service stopped")
+        print(\"[DTLS Server] Service stopped\")
 
 
 class SinkDTLSTransport:
@@ -215,7 +214,7 @@ class SinkDTLSTransport:
             data = self.recv_queue.get(timeout=timeout)
             return data
         except queue.Empty:
-            raise TimeoutError("Receive timeout")
+            raise TimeoutError(\"Receive timeout\")
     
     def sendto(self, data: bytes, address) -> int:
         return self.send(data)
@@ -237,4 +236,4 @@ class SinkDTLSTransport:
         return getattr(self, 'default_timeout', None)
     
     def fileno(self):
-        raise NotImplementedError("Virtual DTLS transport doesn't have a file descriptor")
+        raise NotImplementedError(\"Virtual DTLS transport doesn't have a file descriptor\")

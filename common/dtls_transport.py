@@ -156,3 +156,19 @@ class DTLSTransport:
             NotImplementedError: Virtual sockets don't have file descriptors
         """
         raise NotImplementedError("Virtual DTLS transport doesn't have a file descriptor")
+    
+    def getpeername(self):
+        """Return the remote address (for socket API compatibility)."""
+        return (self.dest_nid.hex()[:15], 0)
+    
+    def getsockname(self):
+        """Return the local address (for socket API compatibility)."""
+        return (self.my_nid.hex()[:15], 0)
+    
+    def setsockopt(self, level, optname, value):
+        """Socket option setter (no-op for virtual socket)."""
+        pass
+    
+    def getsockopt(self, level, optname):
+        """Socket option getter (returns dummy values)."""
+        return 0

@@ -17,7 +17,6 @@ from common.crypto_utils import verify_mac
 from common.security_handshake import SecurityHandshake
 from common.ble_handshake_transport import handshake_receive_queue
 from sink.heartbeat_service import HeartbeatService
-from sink.dtls_server import SinkDTLSServer
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.backends import default_backend
@@ -265,10 +264,9 @@ class SinkConnectionManager:
             handshake_receive_queue.unregister_transport(peer_mac)
 
 class RxCharacteristic(Characteristic):
-    def __init__(self, bus, index, service, conn_manager, dtls_server):
+    def __init__(self, bus, index, service, conn_manager):
         super().__init__(bus, index, SIC_RX_CHAR_UUID, ['write'], service)
         self.conn_manager = conn_manager
-        self.dtls_server = dtls_server
         self.pending_handshakes = {}  # mac -> thread
         
     def WriteValue(self, value, options):
@@ -368,17 +366,12 @@ class RxCharacteristic(Characteristic):
                 except UnicodeDecodeError:
                     print(f"[Inbox] Received binary payload from {src_nid.hex()}: {payload.hex()}")
             
-            elif msg_type == MsgType.DTLS_DATA:
-                # Handle DTLS encrypted packet
-                print(f"[Sink-RX] DTLS packet from {src_nid.hex()[:8]}...")
-                self.dtls_server.handle_dtls_packet(src_nid, payload)
-            
             elif msg_type == MsgType.HEARTBEAT:
                 # Sink usually sends heartbeats, but if nodes send them back for some reason:
                 print(f"[Rx] Heartbeat received from {src_nid.hex()}")
                 
             else:
-                print(f"[Rx] Unknown message type {msg_nid} from {src_nid.hex()}")
+                print(f"[Rx] Unknown message type {msg_type} from {src_nid.hex()}")
 
         except Exception as e:
             print(f"[!] Error processing packet from {mac}: {e}")
@@ -386,11 +379,11 @@ class RxCharacteristic(Characteristic):
             traceback.print_exc()
 
 class SinkApplication(Application):
-    def __init__(self, bus, conn_manager, dtls_server):
+    def __init__(self, bus, conn_manager):
         super().__init__(bus)
         self.service = Service(bus, 0, SIC_SERVICE_UUID, True)
         self.add_service(self.service)
-        self.char = RxCharacteristic(bus, 0, self.service, conn_manager, dtls_server)
+        self.char = RxCharacteristic(bus, 0, self.service, conn_manager)
         self.service.add_characteristic(self.char)
 
 def main():
@@ -422,15 +415,11 @@ def main():
     conn_manager = SinkConnectionManager(sink_nid, args.cert, args.key, args.ca)
     security = RealSecurity(args.key)
     
-    # 3. DTLS Server for end-to-end encryption
-    dtls_server = SinkDTLSServer(conn_manager, args.cert, args.key, args.ca)
-    dtls_server.start()
-    
-    # 4. Heartbeat Service
+    # 3. Heartbeat Service
     hb_service = HeartbeatService(sink_nid, conn_manager, security)
     
-    # 5. GATT Server (Receive Data)
-    app = SinkApplication(BUS, conn_manager, dtls_server)
+    # 4. GATT Server (Receive Data)
+    app = SinkApplication(BUS, conn_manager)
     app.register()
     
     # Start
@@ -445,7 +434,6 @@ def main():
     except KeyboardInterrupt:
         print("\n[Sink] A encerrar...")
         hb_service.stop()
-        dtls_server.stop()
         loop.quit()
 
 if __name__ == "__main__":

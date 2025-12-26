@@ -5,7 +5,6 @@ class MsgType(IntEnum):
     DATA = 1
     HEARTBEAT = 2
     CONTROL = 3
-    DTLS_DATA = 4  # End-to-end encrypted data
 
 NID_SIZE = 16
 

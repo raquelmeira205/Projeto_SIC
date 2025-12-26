@@ -46,6 +46,9 @@ class Router:
             "routed_messages": 0,
             "received_messages": [] # List of (sender_nid, msg_bytes)
         }
+        
+        # DTLS callback for end-to-end encryption
+        self.dtls_callback = None
 
         threading.Thread(target=self._monitor_heartbeat_timeout, daemon=True).start()
 
@@ -94,6 +97,8 @@ class Router:
                 self._handle_heartbeat(payload, incoming_conn, src)
             elif mtype == MsgType.DATA:
                 self._route_data(src, dest, payload)
+            elif mtype == MsgType.DTLS_DATA:
+                self._route_dtls_data(src, dest, payload)
 
         except Exception as e:
             print(f"Packet Error: {e}")
@@ -234,6 +239,77 @@ class Router:
         final_packet = PacketHeader.pack(src, dest, msg_type, payload, seq, mac)
         
         return self.ble.send_packet(conn, final_packet)
+    
+    def register_dtls_callback(self, callback):
+        """
+        Register callback for DTLS packets destined for this node.
+        
+        Args:
+            callback: Function to call with (src_nid, payload) when DTLS packet arrives
+        """
+        self.dtls_callback = callback
+    
+    def _route_dtls_data(self, src, dest, payload):
+        """
+        Route DTLS encrypted data packet.
+        
+        DTLS packets are end-to-end encrypted, so Router just forwards them
+        without decrypting. Only delivers to local DTLS service if destined here.
+        
+        Args:
+            src: Source NID
+            dest: Destination NID
+            payload: Encrypted DTLS payload
+        """
+        if dest == self.my_nid:
+            # Deliver to local DTLS service
+            if self.dtls_callback:
+                self.dtls_callback(src, payload)
+            else:
+                print(f"[Router] Received DTLS packet but no callback registered")
+        else:
+            # Forward to next hop (same as regular DATA)
+            target_conn = None
+            
+            if dest in self.forwarding_table:
+                target_conn = self.forwarding_table[dest]
+            elif self.uplink_connection:
+                target_conn = self.uplink_connection
+            
+            if target_conn:
+                self.stats["routed_messages"] += 1
+                if self._send_authenticated_packet(target_conn, src, dest, MsgType.DTLS_DATA, payload):
+                    print(f"[Router] Forwarded DTLS packet from {src.hex()[:8]}... to {dest.hex()[:8]}...")
+                else:
+                    print(f"[!] Failed to forward DTLS packet")
+    
+    def send_dtls_data(self, dest_nid, encrypted_payload):
+        """
+        Send DTLS encrypted data packet.
+        
+        Used by DTLS transport layer to send encrypted data via Router.
+        
+        Args:
+            dest_nid: Destination NID
+            encrypted_payload: DTLS encrypted data
+            
+        Returns:
+            True if sent successfully, False otherwise
+        """
+        # Route like regular data
+        target_conn = None
+        
+        if dest_nid in self.forwarding_table:
+            target_conn = self.forwarding_table[dest_nid]
+        elif self.uplink_connection:
+            target_conn = self.uplink_connection
+        
+        if target_conn:
+            return self._send_authenticated_packet(target_conn, self.my_nid, dest_nid, MsgType.DTLS_DATA, encrypted_payload)
+        else:
+            print(f"[Router] No route to {dest_nid.hex()[:8]}...")
+            return False
+
     
     def perform_handshake(self, connection_mac, is_initiator=True):
         """

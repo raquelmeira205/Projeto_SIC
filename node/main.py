@@ -14,6 +14,7 @@ from common.ble_handshake_transport import handshake_receive_queue
 from node.ble_manager import BLEManager
 from node.router import Router
 from node.cli_ui import NodeCLI
+from node.dtls_client import NodeDTLSClient
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -129,6 +130,18 @@ class Node:
 
         time.sleep(0.5)
         self.ble_manager.start_advertising()
+        
+        # Initialize DTLS client for end-to-end encryption
+        # Sink NID is all zeros (0x00...00)
+        sink_nid = b'\x00' * 16
+        self.dtls_client = NodeDTLSClient(
+            self.router,
+            cert_path,
+            key_path,
+            ca_cert_path,
+            sink_nid
+        )
+        self.dtls_client.start()
 
         self.running = True
 
@@ -149,11 +162,13 @@ class Node:
         return self.ble_manager.scan_for_devices()
 
     def send_to_sink(self, text):
+        """Send encrypted message to Sink via DTLS."""
         if not self.router.sink_nid:
             print("[!] Sink NID desconhecido")
             return False
-            
-        return self.router.send_app_data(self.router.sink_nid, text.encode('utf-8'))
+        
+        # Use DTLS for end-to-end encryption
+        return self.dtls_client.send_to_sink(text.encode('utf-8'))
 
     def force_connect(self, mac):
         print(f"[*] Force Connect solicitado para {mac}")

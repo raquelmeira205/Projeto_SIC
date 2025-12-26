@@ -61,6 +61,10 @@ class SinkConnectionManager:
         self.session_keys = {}  # mac -> session_key
         # Replay counters for connected nodes (hop-by-hop)
         self.replay_counters = {} # mac -> last_seen_sequence_number
+
+
+        # Mapeamento para limpar DTLS mais tarde
+        self.mac_to_nid = {}    # mac -> nid
         
         # DTLS Server Manager for end-to-end security
         from sink.dtls_server import DtlsServerManager
@@ -76,6 +80,8 @@ class SinkConnectionManager:
         
         # Track which devices we've already checked for services
         self.services_checked = set()  # set of MACs
+
+
 
 
 
@@ -162,6 +168,14 @@ class SinkConnectionManager:
             
             # Send packet
             char_proxy.WriteValue(packet, {'type': GLib.Variant('s', 'command')})
+
+        
+        except Exception as e:
+            # Se der erro a enviar, assumimos que o link morreu.
+            print(f"[Sink] Erro ao enviar para {mac}: {e}")
+            print(f"[Sink] Assumindo desconexão e limpando recursos...")
+            
+            self._cleanup_connection(mac)
             
         except Exception as e:
             # Clear cache on error so we retry next time
@@ -263,6 +277,14 @@ class SinkConnectionManager:
             
             # Store session key
             self.session_keys[peer_mac] = session_key
+
+            # Guardar o NID associado a este MAC
+            # O objeto handshake deve ter o peer_nid disponível após o sucesso
+            if hasattr(handshake, 'peer_nid'):
+                self.mac_to_nid[peer_mac] = handshake.peer_nid
+                print(f"[Sink] Mapeado MAC {peer_mac} -> NID {handshake.peer_nid.hex()[:8]}")
+
+
             print(f"[Sink-Handshake] Concluído com {peer_mac}: {session_key[:8].hex()}...")
             
             # Initialize replay counter for this new session
@@ -271,6 +293,34 @@ class SinkConnectionManager:
             return session_key
         finally:
             handshake_receive_queue.unregister_transport(peer_mac)
+
+
+    def _cleanup_connection(self, mac):
+        """Limpa todos os estados associados a um Node desconectado."""
+        print(f"[Sink] A limpar conexão morta para {mac}...")
+
+        # Limpar Cache BLE
+        if mac in self.char_cache:
+            del self.char_cache[mac]
+        
+        if mac in self.services_checked:
+            self.services_checked.remove(mac)
+
+        # Limpar Chaves de Sessão (Hop-by-Hop)
+        if mac in self.session_keys:
+            del self.session_keys[mac]
+            print(f"[Sink] Chave de sessão removida para {mac}")
+
+        if mac in self.replay_counters:
+            del self.replay_counters[mac]
+
+        # Limpar Sessão DTLS (End-to-End)
+        # Usamos o mapa mac_to_nid 
+        if mac in self.mac_to_nid:
+            nid = self.mac_to_nid[mac]
+            self.dtls_manager.remove_session(nid)
+            del self.mac_to_nid[mac]
+            print(f"[Sink] Sessão DTLS removida para Node {nid.hex()[:8]}")
 
 class RxCharacteristic(Characteristic):
     def __init__(self, bus, index, service, conn_manager):

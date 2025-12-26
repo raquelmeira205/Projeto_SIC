@@ -129,9 +129,9 @@ class SinkConnectionManager:
                         try:
                             if not device.ServicesResolved:
                                 print(f"[Sink] Discovering services for {mac}...")
-                                # Wait up to 5 seconds for services to be discovered
+                                # Wait a bit for services to be discovered
                                 import time
-                                for i in range(50):  # Increased from 10 to 50
+                                for i in range(10):  # Wait up to 1 second
                                     time.sleep(0.1)
                                     device = get_device_object(mac)  # Refresh
                                     if device and device.ServicesResolved:

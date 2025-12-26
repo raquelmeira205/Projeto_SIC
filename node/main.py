@@ -181,23 +181,6 @@ class Node:
         
         # 2. Attempt Connection
         if self.ble_manager.connect_to_device(mac):
-             # Wait for services to be resolved before handshake
-             import time
-             device = get_device_object(mac)
-             if device:
-                 print(f"[BLE] Waiting for service discovery on {mac}...")
-                 for i in range(50):  # Wait up to 5 seconds
-                     try:
-                         device = get_device_object(mac)  # Refresh
-                         if device and device.ServicesResolved:
-                             print(f"[BLE] Services resolved for {mac}")
-                             break
-                     except:
-                         pass
-                     time.sleep(0.1)
-                 else:
-                     print(f"[BLE] Warning: Services not resolved for {mac}, attempting anyway...")
-             
              print(f"[*] Sucesso Conexão Forçada a {mac}")
              
              # 3. Manually set as Uplink

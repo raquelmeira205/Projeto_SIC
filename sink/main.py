@@ -12,6 +12,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from common.bluez_classes import Advertisement, Application, Service, Characteristic
 from common.ble_utils import BUS, SIC_SERVICE_UUID, SIC_RX_CHAR_UUID, get_device_object, get_gatt_characteristic
 from common.pki_utils import read_nid_from_cert
+from common.packet_structs import PacketHeader, MsgType
+from common.crypto_utils import verify_mac
 from common.security_handshake import SecurityHandshake
 from common.ble_handshake_transport import handshake_receive_queue
 from sink.heartbeat_service import HeartbeatService
@@ -57,6 +59,9 @@ class SinkConnectionManager:
         
         # Session keys for connected nodes
         self.session_keys = {}  # mac -> session_key
+        # Replay counters for connected nodes
+        self.replay_counters = {} # mac -> last_seen_sequence_number
+
 
     def start_advertising(self):
         print("[Sink] A iniciar Advertisement (Hop Count=0)...")
@@ -224,6 +229,9 @@ class SinkConnectionManager:
             self.session_keys[peer_mac] = session_key
             print(f"[Sink-Handshake] Concluído com {peer_mac}: {session_key[:8].hex()}...")
             
+            # Initialize replay counter for this new session
+            self.replay_counters[peer_mac] = 0
+            
             return session_key
         finally:
             handshake_receive_queue.unregister_transport(peer_mac)
@@ -288,8 +296,60 @@ class RxCharacteristic(Characteristic):
                 traceback.print_exc()
         
         print(f"[Sink-RX] Recebidos {len(val_bytes)} bytes de {mac}")
-        # Aqui processaria os dados recebidos dos nós
-        # Ex: parse packet, log, store database...
+        
+        # --- Inbox Service Implementation ---
+        try:
+             # 1. Unpack Packet
+            src_nid, dest_nid, msg_type, payload, seq_num, received_mac = PacketHeader.unpack(val_bytes)
+            
+            # 2. Security Verification
+            if mac not in self.conn_manager.session_keys:
+                print(f"[!] Security Alert: Received packet from {mac} without active session")
+                return
+
+            session_key = self.conn_manager.session_keys[mac]
+            
+            # 2a. Replay Protection
+            last_seq = self.conn_manager.replay_counters.get(mac, 0)
+            if seq_num <= last_seq:
+                print(f"[!] Security Alert: Replay detected from {mac} (Seq {seq_num} <= {last_seq})")
+                return
+            
+            # 2b. Integrity Check (MAC)
+            # Reconstruct packet header with zero MAC to verify
+            check_packet = PacketHeader.pack(src_nid, dest_nid, msg_type, payload, seq_num, b'\x00'*32)
+            
+            if not verify_mac(session_key, check_packet, received_mac):
+                print(f"[!] Security Alert: Invalid MAC from {mac}")
+                return
+            
+            # Update sequence number
+            self.conn_manager.replay_counters[mac] = seq_num
+            
+            # 3. Process Packet
+            if msg_type == MsgType.DATA:
+                try:
+                    message_text = payload.decode('utf-8')
+                    print(f"\n{'='*40}")
+                    print(f"INBOX MESSAGE START")
+                    print(f"FROM: Node {src_nid.hex()[:8]}...")
+                    print(f"TEXT: {message_text}")
+                    print(f"SEQ: {seq_num}")
+                    print(f"{'='*40}\n")
+                except UnicodeDecodeError:
+                    print(f"[Inbox] Received binary payload from {src_nid.hex()}: {payload.hex()}")
+            
+            elif msg_type == MsgType.HEARTBEAT:
+                # Sink usually sends heartbeats, but if nodes send them back for some reason:
+                print(f"[Rx] Heartbeat received from {src_nid.hex()}")
+                
+            else:
+                print(f"[Rx] Unknown message type {msg_type} from {src_nid.hex()}")
+
+        except Exception as e:
+            print(f"[!] Error processing packet from {mac}: {e}")
+            import traceback
+            traceback.print_exc()
 
 class SinkApplication(Application):
     def __init__(self, bus, conn_manager):

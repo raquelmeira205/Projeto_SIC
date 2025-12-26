@@ -244,10 +244,10 @@ No CLI do Node:
 - [ ] **Fix: Ver oque se passa com a conexão/handshake as vezes é preciso tentar ligar 4-5 vezes para finalmente funcionar**
 
 #### 🟠 ALTA
-- [ ] **Implementar Inbox Service**
-  - Criar serviço no Sink para receber mensagens
-  - Display de mensagens com NID do remetente
-  - Permitir Nodes enviar mensagens para o Sink
+- [x] **Implementar Inbox Service**
+  - ~~Criar serviço no Sink para receber mensagens~~
+  - ~~Display de mensagens com NID do remetente~~
+  - ~~Permitir Nodes enviar mensagens para o Sink~~
 - [ ] **Verificar Heartbeat Timeout Chain**
   - Confirmar se propagação de timeouts está implementada
   - Testar cascata de desconexões em cadeia

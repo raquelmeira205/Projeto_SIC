@@ -2,4 +2,4 @@ simplepyble
 pydbus
 cryptography
 PyGObject
-wolfssl
+python3-dtls

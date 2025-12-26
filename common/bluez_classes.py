@@ -292,10 +292,6 @@ class Characteristic(object):
     @property
     def Flags(self):
         return self.flags
-    
-    @property
-    def Descriptors(self):
-        return []
 
 class Application(object):
     """

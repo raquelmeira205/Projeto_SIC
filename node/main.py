@@ -11,6 +11,7 @@ from common.bluez_classes import Application, Service, Characteristic
 from common.ble_utils import BUS, SIC_SERVICE_UUID, SIC_RX_CHAR_UUID
 from common.pki_utils import read_nid_from_cert
 from common.ble_handshake_transport import handshake_receive_queue
+from common.ble_agent import BLEAgent
 from node.ble_manager import BLEManager
 from node.router import Router
 from node.cli_ui import NodeCLI
@@ -126,6 +127,10 @@ class Node:
         self.app = NodeApplication(BUS, self.router)
         self.router.app_layer = self.app # Link app layer
         self.app.register()
+
+        # Initialize and register BLE Agent for pairing
+        self.agent = BLEAgent(BUS)
+        self.agent.register()
 
         time.sleep(0.5)
         self.ble_manager.start_advertising()

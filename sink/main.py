@@ -12,6 +12,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from common.bluez_classes import Advertisement, Application, Service, Characteristic
 from common.ble_utils import BUS, SIC_SERVICE_UUID, SIC_RX_CHAR_UUID, get_device_object, get_gatt_characteristic
 from common.pki_utils import read_nid_from_cert
+from common.ble_agent import BLEAgent
 from common.packet_structs import PacketHeader, MsgType
 from common.crypto_utils import verify_mac
 from common.security_handshake import SecurityHandshake
@@ -611,6 +612,10 @@ def main():
     # 4. GATT Server (Receive Data)
     app = SinkApplication(BUS, conn_manager)
     app.register()
+    
+    # Initialize and register BLE Agent for pairing
+    agent = BLEAgent(BUS)
+    agent.register()
     
     # Start
     conn_manager.start_advertising()

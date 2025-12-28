@@ -66,17 +66,6 @@ class SinkConnectionManager:
         self.replay_counters = {} # mac -> last_seen_sequence_number
 
 
-        # Mapeamento para limpar DTLS mais tarde
-        self.mac_to_nid = {}    # mac -> nid
-        
-        # DTLS Server Manager for end-to-end security
-        from sink.dtls_server import DtlsServerManager
-        self.dtls_manager = DtlsServerManager(
-            sink_nid_bytes,
-            cert_path,
-            key_path,
-            ca_cert_path
-        )
         
         # Characteristic cache to avoid repeated lookups
         self.char_cache = {}  # mac -> characteristic proxy
@@ -336,11 +325,6 @@ class SinkConnectionManager:
             # Store session key
             self.session_keys[peer_mac] = session_key
 
-            # Guardar o NID associado a este MAC
-            # O objeto handshake deve ter o peer_nid disponível após o sucesso
-            if hasattr(handshake, 'peer_nid'):
-                self.mac_to_nid[peer_mac] = handshake.peer_nid
-                print(f"[Sink] Mapeado MAC {peer_mac} -> NID {handshake.peer_nid.hex()[:8]}")
 
 
             print(f"[Sink-Handshake] Concluído com {peer_mac}: {session_key[:8].hex()}...")
@@ -372,13 +356,6 @@ class SinkConnectionManager:
         if mac in self.replay_counters:
             del self.replay_counters[mac]
 
-        # Limpar Sessão DTLS (End-to-End)
-        # Usamos o mapa mac_to_nid 
-        if mac in self.mac_to_nid:
-            nid = self.mac_to_nid[mac]
-            self.dtls_manager.remove_session(nid)
-            del self.mac_to_nid[mac]
-            print(f"[Sink] Sessão DTLS removida para Node {nid.hex()[:8]}")
 
 class RxCharacteristic(Characteristic):
     def __init__(self, bus, index, service, conn_manager):
@@ -472,88 +449,18 @@ class RxCharacteristic(Characteristic):
             self.conn_manager.replay_counters[mac] = seq_num
             
             # 3. Process Packet
-            if msg_type == MsgType.DTLS_HANDSHAKE:
-                # DTLS handshake message
-                print(f"[Sink-RX] DTLS handshake message from {src_nid.hex()[:8]}...")
-                
-                try:
-                    from common.dtls_structs import DtlsRecord, DtlsHandshakeMessage, DtlsHandshakeType
-                    
-                    # Unpack DTLS record
-                    content_type, epoch, seq_number, handshake_msg = DtlsRecord.unpack(payload)
-                    msg_type_dtls, msg_seq, fragment = DtlsHandshakeMessage.unpack(handshake_msg)
-                    
-                    # Get or create DTLS session
-                    dtls_session = self.conn_manager.dtls_manager.get_or_create_session(src_nid)
-                    
-                    # Handle based on message type
-                    if msg_type_dtls == DtlsHandshakeType.CLIENT_HELLO:
-                        # Process ClientHello and send ServerHello
-                        response_record = dtls_session.handle_client_hello(handshake_msg)
-                        
-                        # Send response via Router protocol
-                        response_packet = PacketHeader.pack(
-                            self.conn_manager.sink_nid,
-                            src_nid,
-                            MsgType.DTLS_HANDSHAKE,
-                            response_record,
-                            0,
-                            b'\x00'*32
-                        )
-                        # Send via BLE (will be MAC'd by hop-by-hop security)
-                        self.conn_manager._send_packet(mac, list(response_packet))
-                        
-                    elif msg_type_dtls == DtlsHandshakeType.CLIENT_KEY_EXCHANGE:
-                        # Process ClientKeyExchange and send Finished
-                        response_record = dtls_session.handle_client_key_exchange(handshake_msg)
-                        
-                        # Send response
-                        response_packet = PacketHeader.pack(
-                            self.conn_manager.sink_nid,
-                            src_nid,
-                            MsgType.DTLS_HANDSHAKE,
-                            response_record,
-                            0,
-                            b'\x00'*32
-                        )
-                        self.conn_manager._send_packet(mac, list(response_packet))
-                        
-                        print(f"[Sink-RX] DTLS handshake complete with {src_nid.hex()[:8]}...")
-                    
-                except Exception as e:
-                    print(f"[!] DTLS handshake error: {e}")
-                    import traceback
-                    traceback.print_exc()
-            
             elif msg_type == MsgType.DATA:
-                # Check if this is DTLS encrypted data
-                dtls_session = self.conn_manager.dtls_manager.get_session(src_nid)
-                
-                if dtls_session and dtls_session.established:
-                    # Decrypt DTLS record
-                    try:
-                        plaintext = dtls_session.decrypt(payload)
-                        message_text = plaintext.decode('utf-8')
-                        print(f"\n{'='*40}")
-                        print(f"INBOX MESSAGE (DTLS ENCRYPTED)")
-                        print(f"FROM: Node {src_nid.hex()[:8]}...")
-                        print(f"TEXT: {message_text}")
-                        print(f"SEQ: {seq_num}")
-                        print(f"{'='*40}\n")
-                    except Exception as e:
-                        print(f"[!] DTLS decryption failed: {e}")
-                else:
-                    # Regular unencrypted data (legacy)
-                    try:
-                        message_text = payload.decode('utf-8')
-                        print(f"\n{'='*40}")
-                        print(f"INBOX MESSAGE START")
-                        print(f"FROM: Node {src_nid.hex()[:8]}...")
-                        print(f"TEXT: {message_text}")
-                        print(f"SEQ: {seq_num}")
-                        print(f"{'='*40}\n")
-                    except UnicodeDecodeError:
-                        print(f"[Inbox] Received binary payload from {src_nid.hex()}: {payload.hex()}")
+                # Regular unencrypted data (legacy)
+                try:
+                    message_text = payload.decode('utf-8')
+                    print(f"\n{'='*40}")
+                    print(f"INBOX MESSAGE START")
+                    print(f"FROM: Node {src_nid.hex()[:8]}...")
+                    print(f"TEXT: {message_text}")
+                    print(f"SEQ: {seq_num}")
+                    print(f"{'='*40}\n")
+                except UnicodeDecodeError:
+                    print(f"[Inbox] Received binary payload from {src_nid.hex()}: {payload.hex()}")
             
             elif msg_type == MsgType.HEARTBEAT:
                 # Sink usually sends heartbeats, but if nodes send them back for some reason:

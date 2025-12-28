@@ -64,6 +64,10 @@ class SinkConnectionManager:
         self.session_keys = {}  # mac -> session_key
         # Replay counters for connected nodes (hop-by-hop)
         self.replay_counters = {} # mac -> last_seen_sequence_number
+        
+        # DTLS
+        from sink.dtls_server import DtlsServerManager
+        self.dtls_manager = DtlsServerManager(sink_nid_bytes, cert_path, key_path, None)
 
 
         
@@ -469,8 +473,71 @@ class RxCharacteristic(Characteristic):
             # Update sequence number
             self.conn_manager.replay_counters[mac] = seq_num
             
-            # 3. Process Packet
-            if msg_type == MsgType.DATA:
+            if msg_type == MsgType.DTLS_HANDSHAKE:
+                 # Handshake Packet (Unencrypted or Encrypted Handshake msg)
+                 print(f"[Sink-RX] DTLS Packet from {src_nid.hex()[:8]}")
+                 session = self.conn_manager.dtls_manager.get_or_create_session(src_nid)
+                 
+                 try:
+                     # Attempt to decrypt if session expects encryption?
+                     # Check Epoch in header
+                     from common.dtls_structs import DtlsRecord, DtlsHandshakeMessage, DtlsHandshakeType, ContentType
+                     ctype, epoch, seq, dtls_payload = DtlsRecord.unpack(payload)
+                     
+                     if epoch > 0:
+                         # Encrypted (Finished message likely, or Re-handshake)
+                         ctype, plaintext = session.decrypt(payload)
+                         if ctype == ContentType.HANDSHAKE:
+                             hs_type, _, _ = DtlsHandshakeMessage.unpack(plaintext)
+                             if hs_type == DtlsHandshakeType.FINISHED:
+                                 # Send Server Finished
+                                 resp_record = session.handle_finished_and_reply(plaintext[12:], plaintext)
+                                 # Send response
+                                 print("[Sink] Sending Server Finished")
+                                 self.conn_manager.send_authenticated_packet(mac, self.conn_manager.sink_nid, src_nid, MsgType.DTLS_HANDSHAKE, resp_record)
+                                 
+                     else:
+                         # Unencrypted (ClientHello, ClientKeyExchange)
+                         if ctype == ContentType.HANDSHAKE:
+                             hs_type, _, _ = DtlsHandshakeMessage.unpack(dtls_payload)
+                             
+                             if hs_type == DtlsHandshakeType.CLIENT_HELLO:
+                                 resp_record = session.handle_client_hello(dtls_payload[12:], dtls_payload)
+                                 print("[Sink] Sending ServerHello")
+                                 self.conn_manager.send_authenticated_packet(mac, self.conn_manager.sink_nid, src_nid, MsgType.DTLS_HANDSHAKE, resp_record)
+                                 
+                             elif hs_type == DtlsHandshakeType.CLIENT_KEY_EXCHANGE:
+                                 session.handle_client_key_exchange(dtls_payload[12:], dtls_payload)
+                                 # No immediate response, waiting for Finished
+                 
+                 except Exception as e:
+                     print(f"[Sink] DTLS Error: {e}")
+                     import traceback
+                     traceback.print_exc()
+
+            elif msg_type == MsgType.DATA:
+                # App Data (Encrypted)
+                session = self.conn_manager.dtls_manager.get_session(src_nid)
+                if session and session.established:
+                    try:
+                        from common.dtls_structs import ContentType
+                        ctype, plaintext = session.decrypt(payload)
+                        if ctype == ContentType.APPLICATION_DATA:
+                             message_text = plaintext.decode('utf-8')
+                             print(f"\n{'='*40}")
+                             print(f"INBOX MESSAGE (DTLS SECURED)")
+                             print(f"FROM: {src_nid.hex()[:8]}")
+                             print(f"TEXT: {message_text}")
+                             print(f"{'='*40}\n")
+                    except Exception as e:
+                        print(f"[Sink] Decrypt Error: {e}")
+                else:
+                    # Legacy / Plaintext
+                    try:
+                        message_text = payload.decode('utf-8')
+                        print(f"[RX-PLAIN] {message_text}")
+                    except:
+                        pass
                 # Regular unencrypted data (legacy)
                 try:
                     message_text = payload.decode('utf-8')

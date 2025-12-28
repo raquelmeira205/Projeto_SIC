@@ -53,6 +53,10 @@ class Router:
         }
         
 
+        
+        # DTLS Session
+        self.dtls_session = None
+
         threading.Thread(target=self._monitor_heartbeat_timeout, daemon=True).start()
 
     def set_uplink(self, connection_handle, hops):
@@ -106,9 +110,27 @@ class Router:
 
             if mtype == MsgType.HEARTBEAT:
                 self._handle_heartbeat(payload, incoming_conn, src)
+            
+            elif mtype == MsgType.DTLS_HANDSHAKE:
+                # Pass to DTLS Client
+                if self.dtls_session:
+                    self.dtls_session.handle_handshake_message(payload)
+            
             elif mtype == MsgType.DATA:
-                # Regular routing
-                self._route_data(src, dest, payload)
+                if src == self.sink_nid and self.dtls_session:
+                    # Try decrypt
+                    try:
+                        from common.dtls_structs import ContentType
+                        ctype, plaintext = self.dtls_session.recv(payload)
+                        if ctype == ContentType.APPLICATION_DATA:
+                             if self.app_layer: self.app_layer.receive(src, plaintext)
+                        elif ctype == ContentType.HANDSHAKE:
+                             self.dtls_session.handle_handshake_message(payload)
+                    except Exception as e:
+                        print(f"[Router] Decrypt/Process error: {e}")
+                else:
+                    # Regular routing or unknown source
+                    self._route_data(src, dest, payload)            
 
             elif mtype == MsgType.CONTROL:
                 # Handle Control Messages (e.g. CRL Updates)
@@ -232,7 +254,7 @@ class Router:
             for k in kids: self.ble.disconnect_from_device(k)
             self.downlink_connections.clear()
 
-    def _route_data(self, src, dest, payload):
+    def _route_data(self, src, dest, payload, msg_type=MsgType.DATA):
         target_conn = None
         
         if dest == self.my_nid:
@@ -245,7 +267,7 @@ class Router:
 
         if target_conn:
             self.stats["routed_messages"] += 1
-            if self._send_authenticated_packet(target_conn, src, dest, MsgType.DATA, payload):
+            if self._send_authenticated_packet(target_conn, src, dest, msg_type, payload):
                 pass
             else:
                 print(f"[!] Falha ao enviar para {target_conn}")

@@ -14,7 +14,7 @@ from common.ble_utils import BUS, SIC_SERVICE_UUID, SIC_RX_CHAR_UUID, get_device
 from common.pki_utils import read_nid_from_cert
 from common.ble_agent import BLEAgent
 from common.packet_structs import PacketHeader, MsgType
-from common.crypto_utils import verify_mac, generate_mac
+from common.crypto_utils import verify_mac
 from common.security_handshake import SecurityHandshake
 from common.ble_handshake_transport import handshake_receive_queue
 from common.crl_manager import CRLManager
@@ -64,8 +64,6 @@ class SinkConnectionManager:
         self.session_keys = {}  # mac -> session_key
         # Replay counters for connected nodes (hop-by-hop)
         self.replay_counters = {} # mac -> last_seen_sequence_number
-        # Outgoing sequence counters (hop-by-hop)
-        self.my_counters = {} # mac -> my_outgoing_sequence_number
 
 
         # Mapeamento para limpar DTLS mais tarde
@@ -114,8 +112,10 @@ class SinkConnectionManager:
         # REQUIRED FIX
         self.advertisement.register(ADAPTER_PATH)
 
-    def send_authenticated_to_all(self, src_nid, dest_nid, msg_type, payload):
-        """Send authenticated packet to all connected devices."""
+    def send_to_all_links(self, packet):
+        # Enviar para todos os dispositivos conectados que exponham o serviço SIC
+        # 1. Obter dispositivos conectados
+        # Iterar ObjectManager da BlueZ
         try:
             obj_manager = self.bus.get("org.bluez", "/")
             objects = obj_manager.GetManagedObjects()
@@ -125,38 +125,11 @@ class SinkConnectionManager:
                     props = interfaces["org.bluez.Device1"]
                     if props.get("Connected", False):
                         mac = props.get("Address")
-                        self.send_authenticated_packet(mac, src_nid, dest_nid, msg_type, payload)
+                        # Tentar enviar
+                        self._send_packet(mac, packet)
                         
         except Exception as e:
-            print(f"[Sink] Erro ao enviar broadcast: {e}")
-
-    def send_authenticated_packet(self, mac, src, dest, msg_type, payload):
-        """Build and send a packet with Hop-by-Hop authentication (MAC + Seq)."""
-        if mac not in self.session_keys:
-             print(f"[!] Sem chave de sessão para {mac} - ignorando envio")
-             return False
-             
-        key = self.session_keys[mac]
-        
-        # Ensure counter exists (should be init in handshake, but safety check)
-        if mac not in self.my_counters:
-            self.my_counters[mac] = 0
-            
-        self.my_counters[mac] += 1
-        seq = self.my_counters[mac]
-        
-        # 1. Pack with Zero MAC
-        temp_packet = PacketHeader.pack(src, dest, msg_type, payload, seq, b'\x00'*32)
-        
-        # 2. Calculate MAC
-        mac_bytes = generate_mac(key, temp_packet)
-        
-        # 3. Final Pack
-        final_packet = PacketHeader.pack(src, dest, msg_type, payload, seq, mac_bytes)
-        
-        # 4. Send via low-level
-        self._send_packet(mac, list(final_packet))
-        return True
+            print(f"[Sink] Erro ao enviar heartbeats: {e}")
 
     def broadcast_crl(self):
         """Broadcast CURRENT CRL to all connected nodes."""
@@ -178,13 +151,14 @@ class SinkConnectionManager:
             # For header construction, we need source NID (Sink) and dest (Broadcast/Neighbor)
             # Since _send_packet uses connection MAC, we iterate connected links.
             
-            # Send via authenticated broadcast helper
-            self.send_authenticated_to_all(
-                self.sink_nid, 
-                b'\xFF'*16, 
-                MsgType.CONTROL, 
+            packet = PacketHeader.pack(
+                self.sink_nid,
+                b'\xFF'*16, # Broadcast NID placeholder
+                MsgType.CONTROL,
                 payload
             )
+            
+            self.send_to_all_links(packet)
             
         except Exception as e:
             print(f"[Sink] Error broadcasting CRL: {e}")
@@ -373,8 +347,6 @@ class SinkConnectionManager:
             
             # Initialize replay counter for this new session
             self.replay_counters[peer_mac] = 0
-            # Initialize outgoing counter
-            self.my_counters[peer_mac] = 0
             
             return session_key
         finally:
@@ -399,9 +371,6 @@ class SinkConnectionManager:
 
         if mac in self.replay_counters:
             del self.replay_counters[mac]
-
-        if mac in self.my_counters:
-            del self.my_counters[mac]
 
         # Limpar Sessão DTLS (End-to-End)
         # Usamos o mapa mac_to_nid 
@@ -523,28 +492,31 @@ class RxCharacteristic(Characteristic):
                         response_record = dtls_session.handle_client_hello(handshake_msg)
                         
                         # Send response via Router protocol
-                        # Send response via authenticated packet
-                        self.conn_manager.send_authenticated_packet(
-                            mac,
+                        response_packet = PacketHeader.pack(
                             self.conn_manager.sink_nid,
                             src_nid,
                             MsgType.DTLS_HANDSHAKE,
-                            response_record
+                            response_record,
+                            0,
+                            b'\x00'*32
                         )
+                        # Send via BLE (will be MAC'd by hop-by-hop security)
+                        self.conn_manager._send_packet(mac, list(response_packet))
                         
                     elif msg_type_dtls == DtlsHandshakeType.CLIENT_KEY_EXCHANGE:
                         # Process ClientKeyExchange and send Finished
                         response_record = dtls_session.handle_client_key_exchange(handshake_msg)
                         
                         # Send response
-                        # Send response via authenticated packet
-                        self.conn_manager.send_authenticated_packet(
-                            mac,
+                        response_packet = PacketHeader.pack(
                             self.conn_manager.sink_nid,
                             src_nid,
                             MsgType.DTLS_HANDSHAKE,
-                            response_record
+                            response_record,
+                            0,
+                            b'\x00'*32
                         )
+                        self.conn_manager._send_packet(mac, list(response_packet))
                         
                         print(f"[Sink-RX] DTLS handshake complete with {src_nid.hex()[:8]}...")
                     

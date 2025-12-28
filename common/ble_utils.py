@@ -33,7 +33,7 @@ def get_device_object(mac_address):
         # Obtém o objeto D-Bus do dispositivo remoto
         return BUS.get("org.bluez", device_path)
     except Exception as e:
-        print(f"[!] Erro ao obter objeto D-Bus para {mac_address}: {e}")
+        # print(f"[!] Erro ao obter objeto D-Bus para {mac_address}: {e}")
         return None
 
 def get_gatt_characteristic(mac_address, uuid):

@@ -333,6 +333,10 @@ class BLEManager:
         if not self.uplink_addr:
             return
 
-        device = get_device_object(self.uplink_addr)
-        if not device or not device.Connected:
-            self.trigger_chain_disconnection()
+        try:
+            device = get_device_object(self.uplink_addr)
+            if not device or not device.Connected:
+                self.trigger_chain_disconnection()
+        except Exception:
+             # Se der erro a aceder ao objeto, assumimos que desconectou
+             self.trigger_chain_disconnection()

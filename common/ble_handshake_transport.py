@@ -152,7 +152,7 @@ class BLEHandshakeTransport:
         chunks = sorted(chunks, key=lambda x: x[1])
         
         # Check if we have all chunks
-        expected_chunks = (expected_length + 480 - 1) // 480
+        expected_chunks = (expected_length + MAX_CHUNK_SIZE - 1) // MAX_CHUNK_SIZE
         
         print(f"[Handshake-RX-DEBUG] Reassemble: total_length={expected_length}, expected_chunks={expected_chunks}, received={len(chunks)}")
         
@@ -181,7 +181,7 @@ class BLEHandshakeTransport:
         
         # Check if we have all chunks
         total_length = chunks[0][0]
-        expected_chunks = (total_length + 480 - 1) // 480  # Match MAX_CHUNK_SIZE
+        expected_chunks = (total_length + MAX_CHUNK_SIZE - 1) // MAX_CHUNK_SIZE  # Match MAX_CHUNK_SIZE
         
         print(f"[Handshake-RX-DEBUG] Reassemble: total_length={total_length}, expected_chunks={expected_chunks}, received={len(chunks)}")
         

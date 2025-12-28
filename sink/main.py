@@ -272,7 +272,7 @@ class SinkConnectionManager:
             
             def send(self, data):
                 # Send via Sink's _send_packet
-                MAX_CHUNK_SIZE = 480
+                MAX_CHUNK_SIZE = 100
                 total_length = len(data)
                 num_chunks = (total_length + MAX_CHUNK_SIZE - 1) // MAX_CHUNK_SIZE
                 
@@ -311,7 +311,7 @@ class SinkConnectionManager:
                     return None
                 chunks = sorted(self.receive_buffer, key=lambda x: x[1])
                 total_length = chunks[0][0]
-                expected_chunks = (total_length + 480 - 1) // 480
+                expected_chunks = (total_length + 100 - 1) // 100
                 if len(chunks) < expected_chunks:
                     return None
                 data = b''.join(chunk[2] for chunk in chunks)

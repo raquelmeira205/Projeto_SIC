@@ -24,13 +24,15 @@ class HeartbeatService:
             
             hb_payload = HeartbeatPayload.pack(self.sequence_number, signature)
             
-            print(f"[Sink] A enviar Heartbeat #{self.sequence_number}")
-            self.conn_manager.send_authenticated_to_all(
-                src_nid=self.sink_nid,
-                dest_nid=b'\x00'*16,
+            packet = PacketHeader.pack(
+                source_nid=self.sink_nid,
+                dest_nid=b'\x00'*16, 
                 msg_type=MsgType.HEARTBEAT,
                 payload=hb_payload
             )
+
+            print(f"[Sink] A enviar Heartbeat #{self.sequence_number}")
+            self.conn_manager.send_to_all_links(packet)
 
             self.sequence_number += 1
             time.sleep(5) 

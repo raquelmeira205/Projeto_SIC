@@ -52,13 +52,15 @@ def get_gatt_characteristic(mac_address, uuid):
         print(f"[!] Característica {uuid} não encontrada em {mac_address}.")
         
         # Enhanced Debugging: List all available characteristics for this device
-        print(f"[DEBUG] Características disponíveis em {mac_address}:")
+        print(f"[DEBUG] Características disponíveis em {mac_address} (D-Bus dump):")
         for path, interfaces in objects.items():
-             if "org.bluez.GattCharacteristic1" in interfaces:
-                 if path.startswith(device_path):
-                     props = interfaces["org.bluez.GattCharacteristic1"]
-                     c_uuid = props.get("UUID")
-                     print(f"   - {c_uuid} @ {path}")
+             if path.startswith(device_path):
+                 print(f"   path: {path}")
+                 for inf in interfaces:
+                     print(f"     - interface: {inf}")
+                     if inf == "org.bluez.GattCharacteristic1":
+                         props = interfaces[inf]
+                         print(f"       UUID: {props.get('UUID')}")
 
         return None
     except Exception as e:

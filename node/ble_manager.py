@@ -160,7 +160,7 @@ class BLEManager:
             except Exception as e:
                 error_msg = str(e)
                 # If it returns an object path, that's actually success!
-                if 'returned type "(o)"' in error_msg or '/org/bluez/' in error_msg:
+                if 'returned type' in error_msg and '(o)' in error_msg:
                     print(f"[*] ConnectDevice iniciou conexão (object path retornado)")
                     connection_initiated = True
                 else:

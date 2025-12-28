@@ -179,7 +179,7 @@ class SinkConnectionManager:
                             print(f"[Sink] Discovering services for {mac}...")
                             
                             # O handshake inicial precisa de mais tempo
-                            for i in range(30): 
+                            for i in range(100): # Increased to 10s (100 * 0.1)
                                 if device.ServicesResolved:
                                     print(f"[Sink] Services resolved for {mac}")
                                     break
@@ -214,11 +214,26 @@ class SinkConnectionManager:
             char_proxy.WriteValue(packet, {'type': GLib.Variant('s', 'command')})
 
         except Exception as e:
-            # Se der erro a enviar, assumimos que o link morreu.
             print(f"[Sink] Erro ao enviar para {mac}: {e}")
-            print(f"[Sink] Assumindo desconexão e limpando recursos...")
             
-            self._cleanup_connection(mac)
+            # Check if device is still connected before cleaning up
+            is_connected = False
+            try:
+                # Re-fetch device object to get latest state
+                device = get_device_object(mac)
+                if device and device.Connected:
+                    is_connected = True
+            except:
+                pass
+
+            if is_connected:
+                 print(f"[Sink] Aviso: Erro de envio mas dispositivo {mac} ainda conectado. Mantendo sessão.")
+                 # Clear cache just in case the characteristic object is stale
+                 if mac in self.char_cache:
+                     del self.char_cache[mac]
+            else:
+                 print(f"[Sink] Assumindo desconexão e limpando recursos...")
+                 self._cleanup_connection(mac)
             
         except Exception as e:
             # Clear cache on error so we retry next time
@@ -373,6 +388,7 @@ class RxCharacteristic(Characteristic):
         
     def WriteValue(self, value, options):
         val_bytes = bytes(value)
+        print(f"[Sink-RX-RAW] WriteValue called with {len(val_bytes)} bytes")
         
         # Extract MAC address
         mac = "unknown"

@@ -50,7 +50,7 @@ class BLEHandshakeTransport:
         # We'll chunk the data with a simple framing protocol:
         # [0xFF (handshake marker)][total_length (4 bytes)][chunk_index (2 bytes)][chunk_data]
         
-        MAX_CHUNK_SIZE = 480  # Conservative chunk size to leave room for framing
+        MAX_CHUNK_SIZE = 100  # Conservative chunk size to leave room for framing
         total_length = len(data)
         num_chunks = (total_length + MAX_CHUNK_SIZE - 1) // MAX_CHUNK_SIZE
         

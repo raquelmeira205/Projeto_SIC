@@ -449,7 +449,7 @@ class RxCharacteristic(Characteristic):
             self.conn_manager.replay_counters[mac] = seq_num
             
             # 3. Process Packet
-            elif msg_type == MsgType.DATA:
+            if msg_type == MsgType.DATA:
                 # Regular unencrypted data (legacy)
                 try:
                     message_text = payload.decode('utf-8')

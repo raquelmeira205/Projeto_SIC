@@ -111,6 +111,10 @@ class BLEManager:
         except Exception:
             return False
 
+    def write_value(self, mac, data):
+       
+        return self.send_packet(mac, data)
+
     # ------------------------------------------------------------------
     # Conexões
     # ------------------------------------------------------------------

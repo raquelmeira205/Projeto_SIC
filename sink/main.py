@@ -382,13 +382,13 @@ class SinkConnectionManager:
 
 class RxCharacteristic(Characteristic):
     def __init__(self, bus, index, service, conn_manager):
-        super().__init__(bus, index, SIC_RX_CHAR_UUID, ['write'], service)
+        super().__init__(bus, index, SIC_RX_CHAR_UUID, ['write', 'write-without-response'], service)
         self.conn_manager = conn_manager
         self.pending_handshakes = {}  # mac -> thread
         
     def WriteValue(self, value, options):
         val_bytes = bytes(value)
-        print(f"[Sink-RX-RAW] WriteValue called with {len(val_bytes)} bytes")
+        print(f"[Sink-RX-RAW] WriteValue called with {len(val_bytes)} bytes", flush=True)
         
         # Extract MAC address
         mac = "unknown"

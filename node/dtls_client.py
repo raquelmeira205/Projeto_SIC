@@ -73,9 +73,22 @@ class DtlsSession:
     def handle_handshake_message(self, record_payload):
         # Unwrap Record
         try:
+            # We must check epoch to see if it is encrypted
+            # DtlsRecord.unpack returns cipher text if epoch > 0
             c_type, epoch, seq, payload = DtlsRecord.unpack(record_payload)
+            
+            if epoch > 0:
+                # Encrypted! Use recv() logic to decrypt
+                # Rewind and use self.recv?
+                # recv expects full record bytes
+                c_type, plaintext = self.recv(record_payload)
+                payload = plaintext
+                
         except ValueError:
             print("[DTLS-Client] Error unpacking record")
+            return
+        except Exception as e:
+            print(f"[DTLS-Client] Decrypt error in handshake: {e}")
             return
 
         if c_type == ContentType.HANDSHAKE:

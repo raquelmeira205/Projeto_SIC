@@ -589,7 +589,7 @@ def main():
     
     # Start
     conn_manager.start_advertising()
-    conn_manager.start_advertising()
+
     hb_service.start()
     
     # 5. CRL Broadcast Service (Periodic)

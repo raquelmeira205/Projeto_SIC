@@ -1,6 +1,5 @@
 import os
 import time
-from enum import Enumit
 from enum import Enum
 from cryptography.hazmat.primitives import hashes, serialization, hmac
 from cryptography.hazmat.primitives.asymmetric import ec

@@ -59,6 +59,11 @@ class Router:
         self.uplink_connection = connection_handle
         self.hops_to_sink = hops + 1
         self.last_heartbeat_time = time.time()
+
+        print(f"[Router] Conectado a {connection_handle}. A aguardar estabilização do link...")
+        # pausa para o BlueZ negociar MTU e intervalos
+        time.sleep(2.0)
+
         # Init security state for uplink if not exists
         if connection_handle not in self.link_keys:
              # Perform handshake to establish session key

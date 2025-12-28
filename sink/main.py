@@ -267,7 +267,7 @@ class SinkConnectionManager:
                     )
                     
                     self.sink._send_packet(self.mac, list(frame))
-                    time.sleep(0.05)
+                    time.sleep(0.15)
             
             def receive(self):
                 import time
@@ -589,7 +589,6 @@ def main():
     
     # Start
     conn_manager.start_advertising()
-
     hb_service.start()
     
     # 5. CRL Broadcast Service (Periodic)

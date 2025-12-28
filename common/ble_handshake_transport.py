@@ -69,12 +69,25 @@ class BLEHandshakeTransport:
                 chunk_data
             )
             
-            # Use BLE manager to send the packet
-            success = self.ble_manager.send_packet(self.mac, frame)
-            if not success:
-                raise RuntimeError(f"Failed to send chunk {i}/{num_chunks}")
+            # --- LÓGICA DE RETRY ---
+            sucesso = False
+            tentativas = 3
+            while not sucesso and tentativas > 0:
+                try:
+                    # Tenta enviar
+                    self.ble_manager.write_value(self.mac, frame)
+                    sucesso = True
+                    
+                    # pausa para não entupir o buffer do BlueZ
+                    time.sleep(0.15) 
+                    
+                except Exception as e:
+                    print(f"[Transport] Falha no chunk {i}, a tentar de novo... ({e})")
+                    tentativas -= 1
+                    time.sleep(0.5) 
             
-            time.sleep(0.05)  # Small delay between chunks
+            if not sucesso:
+                raise ConnectionError(f"Falha fatal ao enviar chunk {i} após 3 tentativas")
         
         print(f"[Handshake-TX] Sent {num_chunks} chunks successfully")
     

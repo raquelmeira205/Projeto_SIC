@@ -382,7 +382,7 @@ class SinkConnectionManager:
 
 class RxCharacteristic(Characteristic):
     def __init__(self, bus, index, service, conn_manager):
-        super().__init__(bus, index, SIC_RX_CHAR_UUID, ['write', 'write-without-response'], service)
+        super().__init__(bus, index, SIC_RX_CHAR_UUID, ['write'], service)
         self.conn_manager = conn_manager
         self.pending_handshakes = {}  # mac -> thread
         

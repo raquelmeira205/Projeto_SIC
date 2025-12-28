@@ -75,8 +75,11 @@ class BLEHandshakeTransport:
             while not sucesso and tentativas > 0:
                 try:
                     # Tenta enviar
-                    self.ble_manager.write_value(self.mac, frame)
-                    sucesso = True
+                    # Tenta enviar
+                    if self.ble_manager.write_value(self.mac, frame):
+                        sucesso = True
+                    else:
+                        print(f"[Transport] write_value retornou False no chunk {i}")
                     
                     # pausa para não entupir o buffer do BlueZ
                     time.sleep(0.15) 

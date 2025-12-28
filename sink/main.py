@@ -175,16 +175,26 @@ class SinkConnectionManager:
                     if device:
                         # Check if services are resolved
                         try:
-                            if not device.ServicesResolved:
-                                print(f"[Sink] Discovering services for {mac}...")
-                                # Wait a bit for services to be discovered
+                          
+                            print(f"[Sink] Discovering services for {mac}...")
+                            
+                            # O handshake inicial precisa de mais tempo
+                            for i in range(30): 
+                                if device.ServicesResolved:
+                                    print(f"[Sink] Services resolved for {mac}")
+                                    break
+                                
+
+                                if get_gatt_characteristic(mac, SIC_RX_CHAR_UUID):
+                                    print(f"[Sink] Found characteristic early for {mac}")
+                                    break
+                                
+                                # Refresh object e esperar
                                 import time
-                                for i in range(10):  # Wait up to 1 second
-                                    time.sleep(0.1)
-                                    device = get_device_object(mac)  # Refresh
-                                    if device and device.ServicesResolved:
-                                        print(f"[Sink] Services resolved for {mac}")
-                                        break
+                                time.sleep(0.1)
+                                device = get_device_object(mac)
+                            # ----------------------------------------------------
+                            
                         except:
                             pass  # Property might not exist
                     
@@ -203,7 +213,6 @@ class SinkConnectionManager:
             # Send packet
             char_proxy.WriteValue(packet, {'type': GLib.Variant('s', 'command')})
 
-        
         except Exception as e:
             # Se der erro a enviar, assumimos que o link morreu.
             print(f"[Sink] Erro ao enviar para {mac}: {e}")

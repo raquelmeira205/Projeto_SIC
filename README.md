@@ -81,6 +81,8 @@ sudo systemctl restart bluetooth
 
 Isto evita que fiquem processos ou conexões empancadas do BlueZ.
 
+
+
 ---
 
 ## 📡 Arquitetura da Rede
@@ -309,6 +311,10 @@ No CLI do Node:
   - Verificação de revogação antes de aceitar conexões
 - [x] **Fix: Sink crash quando Node se desliga**
 - [x] **Verificar Heartbeat Timeout Chain**
+- [x] **Fix: Instabilidade no Handshake / Conexão**
+  - Resolvido com a implementação do **BLE Pairing Agent** (`common/ble_agent.py`)
+  - O sistema agora aceita pedidos de emparelhamento do BlueZ ("Just Works") automaticamente
+  - Evita desconexões por "Authentication Failed" no nível do GATT
 
 
 ### 📋 Por Fazer (Prioridades)
@@ -317,9 +323,7 @@ No CLI do Node:
 - [x] **Fix: Sink crash quando Node se desliga**
   - Sink "tripa" quando um Node desconecta abruptamente
   - Implementar gestão robusta de desconexões
-- [ ] **Fix: Ver oque se passa com a conexão/handshake as vezes é preciso tentar ligar 4-5 vezes para finalmente funcionar**
-  - Melhorar robustez do handshake inicial
-  - Investigar timing issues no BLE connection establishment
+
 
 #### 🟠 ALTA
 

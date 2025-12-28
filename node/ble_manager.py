@@ -316,15 +316,12 @@ class BLEManager:
     # ------------------------------------------------------------------
 
     def trigger_chain_disconnection(self):
-        print("[!!!] Perda de uplink")
+        print("[!!!] Perda de uplink (Nível BLE)")
 
         self.uplink_addr = None
         self.uplink_nid = None
         self.hop_count = -1
 
-        for mac in list(self.downlinks.keys()):
-            self.disconnect_from_device(mac)
-            del self.downlinks[mac]
 
         self.update_advertisement()
 

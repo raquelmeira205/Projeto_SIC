@@ -307,6 +307,9 @@ No CLI do Node:
   - Lista de NIDs/serials revogados
   - Distribuição via mensagens de controlo do Sink
   - Verificação de revogação antes de aceitar conexões
+- [x] **Verificar Heartbeat Timeout Chain**
+  - Confirmar se propagação de timeouts está implementada
+  - Testar cascata de desconexões em cadeia
 
 ### 📋 Por Fazer (Prioridades)
 
@@ -319,9 +322,6 @@ No CLI do Node:
   - Investigar timing issues no BLE connection establishment
 
 #### 🟠 ALTA
-- [ ] **Verificar Heartbeat Timeout Chain**
-  - Confirmar se propagação de timeouts está implementada
-  - Testar cascata de desconexões em cadeia
 
 #### 🟡 MÉDIA
 - [ ] **Network Control para Simulação**

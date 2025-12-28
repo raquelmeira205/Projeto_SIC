@@ -175,16 +175,26 @@ class SinkConnectionManager:
                     if device:
                         # Check if services are resolved
                         try:
-                            if not device.ServicesResolved:
-                                print(f"[Sink] Discovering services for {mac}...")
-                                # Wait a bit for services to be discovered
+                          
+                            print(f"[Sink] Discovering services for {mac}...")
+                            
+                            # O handshake inicial precisa de mais tempo
+                            for i in range(100): # Increased to 10s (100 * 0.1)
+                                if device.ServicesResolved:
+                                    print(f"[Sink] Services resolved for {mac}")
+                                    break
+                                
+
+                                if get_gatt_characteristic(mac, SIC_RX_CHAR_UUID):
+                                    print(f"[Sink] Found characteristic early for {mac}")
+                                    break
+                                
+                                # Refresh object e esperar
                                 import time
-                                for i in range(10):  # Wait up to 1 second
-                                    time.sleep(0.1)
-                                    device = get_device_object(mac)  # Refresh
-                                    if device and device.ServicesResolved:
-                                        print(f"[Sink] Services resolved for {mac}")
-                                        break
+                                time.sleep(0.1)
+                                device = get_device_object(mac)
+                            # ----------------------------------------------------
+                            
                         except:
                             pass  # Property might not exist
                     
@@ -203,13 +213,27 @@ class SinkConnectionManager:
             # Send packet
             char_proxy.WriteValue(packet, {'type': GLib.Variant('s', 'command')})
 
-        
         except Exception as e:
-            # Se der erro a enviar, assumimos que o link morreu.
             print(f"[Sink] Erro ao enviar para {mac}: {e}")
-            print(f"[Sink] Assumindo desconexão e limpando recursos...")
             
-            self._cleanup_connection(mac)
+            # Check if device is still connected before cleaning up
+            is_connected = False
+            try:
+                # Re-fetch device object to get latest state
+                device = get_device_object(mac)
+                if device and device.Connected:
+                    is_connected = True
+            except:
+                pass
+
+            if is_connected:
+                 print(f"[Sink] Aviso: Erro de envio mas dispositivo {mac} ainda conectado. Mantendo sessão.")
+                 # Clear cache just in case the characteristic object is stale
+                 if mac in self.char_cache:
+                     del self.char_cache[mac]
+            else:
+                 print(f"[Sink] Assumindo desconexão e limpando recursos...")
+                 self._cleanup_connection(mac)
             
         except Exception as e:
             # Clear cache on error so we retry next time
@@ -248,7 +272,7 @@ class SinkConnectionManager:
             
             def send(self, data):
                 # Send via Sink's _send_packet
-                MAX_CHUNK_SIZE = 480
+                MAX_CHUNK_SIZE = 100
                 total_length = len(data)
                 num_chunks = (total_length + MAX_CHUNK_SIZE - 1) // MAX_CHUNK_SIZE
                 
@@ -267,7 +291,7 @@ class SinkConnectionManager:
                     )
                     
                     self.sink._send_packet(self.mac, list(frame))
-                    time.sleep(0.05)
+                    time.sleep(0.15)
             
             def receive(self):
                 import time
@@ -287,7 +311,7 @@ class SinkConnectionManager:
                     return None
                 chunks = sorted(self.receive_buffer, key=lambda x: x[1])
                 total_length = chunks[0][0]
-                expected_chunks = (total_length + 480 - 1) // 480
+                expected_chunks = (total_length + 100 - 1) // 100
                 if len(chunks) < expected_chunks:
                     return None
                 data = b''.join(chunk[2] for chunk in chunks)
@@ -358,12 +382,13 @@ class SinkConnectionManager:
 
 class RxCharacteristic(Characteristic):
     def __init__(self, bus, index, service, conn_manager):
-        super().__init__(bus, index, SIC_RX_CHAR_UUID, ['write'], service)
+        super().__init__(bus, index, SIC_RX_CHAR_UUID, ['write', 'write-without-response'], service)
         self.conn_manager = conn_manager
         self.pending_handshakes = {}  # mac -> thread
         
     def WriteValue(self, value, options):
         val_bytes = bytes(value)
+        print(f"[Sink-RX-RAW] WriteValue called with {len(val_bytes)} bytes", flush=True)
         
         # Extract MAC address
         mac = "unknown"
@@ -588,7 +613,6 @@ def main():
     app.register()
     
     # Start
-    conn_manager.start_advertising()
     conn_manager.start_advertising()
     hb_service.start()
     

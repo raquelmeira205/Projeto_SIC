@@ -307,14 +307,14 @@ No CLI do Node:
   - Lista de NIDs/serials revogados
   - Distribuição via mensagens de controlo do Sink
   - Verificação de revogação antes de aceitar conexões
+- [x] **Fix: Sink crash quando Node se desliga**
 - [x] **Verificar Heartbeat Timeout Chain**
-  - Confirmar se propagação de timeouts está implementada
-  - Testar cascata de desconexões em cadeia
+
 
 ### 📋 Por Fazer (Prioridades)
 
 #### 🔴 CRÍTICO
-- [ ] **Fix: Sink crash quando Node se desliga**
+- [x] **Fix: Sink crash quando Node se desliga**
   - Sink "tripa" quando um Node desconecta abruptamente
   - Implementar gestão robusta de desconexões
 - [ ] **Fix: Ver oque se passa com a conexão/handshake as vezes é preciso tentar ligar 4-5 vezes para finalmente funcionar**

@@ -50,7 +50,7 @@ class BLEHandshakeTransport:
         # We'll chunk the data with a simple framing protocol:
         # [0xFF (handshake marker)][total_length (4 bytes)][chunk_index (2 bytes)][chunk_data]
         
-        MAX_CHUNK_SIZE = 480  # Conservative chunk size to leave room for framing
+        MAX_CHUNK_SIZE = 100  # Conservative chunk size to leave room for framing
         total_length = len(data)
         num_chunks = (total_length + MAX_CHUNK_SIZE - 1) // MAX_CHUNK_SIZE
         
@@ -69,12 +69,25 @@ class BLEHandshakeTransport:
                 chunk_data
             )
             
-            # Use BLE manager to send the packet
-            success = self.ble_manager.send_packet(self.mac, frame)
-            if not success:
-                raise RuntimeError(f"Failed to send chunk {i}/{num_chunks}")
+            # --- LÓGICA DE RETRY ---
+            sucesso = False
+            tentativas = 3
+            while not sucesso and tentativas > 0:
+                try:
+                    # Tenta enviar
+                    self.ble_manager.write_value(self.mac, frame)
+                    sucesso = True
+                    
+                    # pausa para não entupir o buffer do BlueZ
+                    time.sleep(0.15) 
+                    
+                except Exception as e:
+                    print(f"[Transport] Falha no chunk {i}, a tentar de novo... ({e})")
+                    tentativas -= 1
+                    time.sleep(0.5) 
             
-            time.sleep(0.05)  # Small delay between chunks
+            if not sucesso:
+                raise ConnectionError(f"Falha fatal ao enviar chunk {i} após 3 tentativas")
         
         print(f"[Handshake-TX] Sent {num_chunks} chunks successfully")
     
@@ -139,7 +152,7 @@ class BLEHandshakeTransport:
         chunks = sorted(chunks, key=lambda x: x[1])
         
         # Check if we have all chunks
-        expected_chunks = (expected_length + 480 - 1) // 480
+        expected_chunks = (expected_length + MAX_CHUNK_SIZE - 1) // MAX_CHUNK_SIZE
         
         print(f"[Handshake-RX-DEBUG] Reassemble: total_length={expected_length}, expected_chunks={expected_chunks}, received={len(chunks)}")
         
@@ -168,7 +181,7 @@ class BLEHandshakeTransport:
         
         # Check if we have all chunks
         total_length = chunks[0][0]
-        expected_chunks = (total_length + 480 - 1) // 480  # Match MAX_CHUNK_SIZE
+        expected_chunks = (total_length + MAX_CHUNK_SIZE - 1) // MAX_CHUNK_SIZE  # Match MAX_CHUNK_SIZE
         
         print(f"[Handshake-RX-DEBUG] Reassemble: total_length={total_length}, expected_chunks={expected_chunks}, received={len(chunks)}")
         

@@ -46,7 +46,7 @@ class RealSecurity:
 
 class RxCharacteristic(Characteristic):
     def __init__(self, bus, index, service, router):
-        super().__init__(bus, index, SIC_RX_CHAR_UUID, ['write'], service)
+        super().__init__(bus, index, SIC_RX_CHAR_UUID, ['write', 'write-without-response'], service)
         self.router = router
 
     def WriteValue(self, value, options):

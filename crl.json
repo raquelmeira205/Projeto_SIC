@@ -1,6 +1,6 @@
-[
-    {
-        "serial_number": 12345,
-        "revocation_date": "2025-01-01T00:00:00Z"
-    }
-]
+{
+    "revoked": [
+        12345
+    ],
+    "version": 1
+}

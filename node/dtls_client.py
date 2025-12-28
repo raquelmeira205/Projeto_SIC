@@ -204,7 +204,7 @@ class DtlsSession:
         
         # Send via Router with DTLS_HANDSHAKE message type
         # Router will apply hop-by-hop MAC
-        self.router._route_data(self.my_nid, self.sink_nid, record, MsgType.DTLS_HANDSHAKE)
+        self.router._route_data(self.my_nid, self.sink_nid, record)
     
     def _wait_for_response(self):
         """Wait for handshake response"""

@@ -114,10 +114,10 @@ class Router:
             dtls_record = self.dtls_session.send(payload)
             
             # Send DTLS record via Router (hop-by-hop MAC will be applied)
-            self._route_data(self.my_nid, dest_nid, dtls_record, MsgType.DATA)
+            self._route_data(self.my_nid, dest_nid, dtls_record)
         else:
             # Direct routing (no DTLS for non-Sink destinations)
-            self._route_data(self.my_nid, dest_nid, payload, MsgType.DATA)
+            self._route_data(self.my_nid, dest_nid, payload)
         
         return True
 
@@ -159,7 +159,7 @@ class Router:
                         print(f"[!] DTLS decryption failed: {e}")
                 else:
                     # Regular routing
-                    self._route_data(src, dest, payload, MsgType.DATA)
+                    self._route_data(src, dest, payload)
 
             elif mtype == MsgType.CONTROL:
                 # Handle Control Messages (e.g. CRL Updates)
@@ -283,7 +283,7 @@ class Router:
             for k in kids: self.ble.disconnect_from_device(k)
             self.downlink_connections.clear()
 
-    def _route_data(self, src, dest, payload, msg_type=MsgType.DATA):
+    def _route_data(self, src, dest, payload):
         target_conn = None
         
         if dest == self.my_nid:
@@ -296,7 +296,7 @@ class Router:
 
         if target_conn:
             self.stats["routed_messages"] += 1
-            if self._send_authenticated_packet(target_conn, src, dest, msg_type, payload):
+            if self._send_authenticated_packet(target_conn, src, dest, MsgType.DATA, payload):
                 pass
             else:
                 print(f"[!] Falha ao enviar para {target_conn}")

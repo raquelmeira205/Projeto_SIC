@@ -215,8 +215,15 @@ class SinkConnectionManager:
             char_proxy.WriteValue(packet, {'type': GLib.Variant('s', 'command')})
 
         except Exception as e:
+            err_str = str(e)
             print(f"[Sink] Erro ao enviar para {mac}: {e}")
             
+            # If the characteristic is missing, it implies connection loss or state de-sync
+            if "UnknownObject" in err_str or "doesn't exist" in err_str:
+                 print(f"[Sink] Detectada perda de acesso GATT a {mac}. Assumindo desconexão.")
+                 self._cleanup_connection(mac)
+                 return
+
             # Check if device is still connected before cleaning up
             is_connected = False
             try:
@@ -235,15 +242,7 @@ class SinkConnectionManager:
             else:
                  print(f"[Sink] Assumindo desconexão e limpando recursos...")
                  self._cleanup_connection(mac)
-            
-        except Exception as e:
-            # Clear cache on error so we retry next time
-            if mac in self.char_cache:
-                del self.char_cache[mac]
-            if mac in self.services_checked:
-                self.services_checked.remove(mac)
-            print(f"[Sink] Error sending to {mac}: {e}")
-            pass # Ignorar falhas de envio (best effort)
+            pass # Ignorar outros erros (best effort)
     
     def perform_handshake(self, peer_mac):
         """

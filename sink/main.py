@@ -7,7 +7,8 @@ import argparse
 from gi.repository import GLib
 
 # Adicionar diretório pai ao path para importar 'common'
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Adicionar diretório pai ao path para importar 'common'
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from common.bluez_classes import Advertisement, Application, Service, Characteristic
 from common.ble_utils import BUS, SIC_SERVICE_UUID, SIC_RX_CHAR_UUID, get_device_object, get_gatt_characteristic

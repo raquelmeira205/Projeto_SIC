@@ -66,7 +66,7 @@ class DtlsRecord:
             13-byte header
         """
         return struct.pack(
-            '!BBHHH',
+            '!BBBHH',
             content_type,
             DtlsVersion.MAJOR,
             DtlsVersion.MINOR,
@@ -85,8 +85,8 @@ class DtlsRecord:
         if len(data) < DtlsRecord.HEADER_SIZE:
             raise ValueError("Data too short for DTLS header")
         
-        content_type, major, minor, epoch, length = struct.unpack('!BBHHH', data[:9])
-        seq_number = int.from_bytes(data[9:15], 'big')
+        content_type, major, minor, epoch, length = struct.unpack('!BBBHH', data[:7])
+        seq_number = int.from_bytes(data[7:13], 'big')
         
         if major != DtlsVersion.MAJOR or minor != DtlsVersion.MINOR:
             raise ValueError(f"Invalid DTLS version: {major}.{minor}")

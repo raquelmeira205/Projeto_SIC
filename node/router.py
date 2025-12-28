@@ -84,10 +84,50 @@ class Router:
                  raise
 
     
+    def send_data_packet(self, dest_nid, payload, msg_type=MsgType.DATA):
+        """Helper to send raw data packet (used by DTLS client for handshake records)"""
+        self._route_data(self.my_nid, dest_nid, payload, msg_type)
+
+    def establish_dtls_session(self):
+        if not self.sink_nid:
+             print("[Router] Sink unknown, cannot start DTLS")
+             return
+             
+        from node.dtls_client import DtlsSession
+        self.dtls_session = DtlsSession(
+            self.sink_nid, self.my_nid, 
+            self.cert_path, self.key_path, self.ca_cert_path, 
+            self
+        )
+        self.dtls_session.perform_handshake()
+
     def send_app_data(self, dest_nid, payload):
-        """Send application data (hop-by-hop secured)"""
-        # Direct routing
-        self._route_data(self.my_nid, dest_nid, payload)
+        """Send application data (End-to-End Encrypted if to Sink)"""
+        
+        if dest_nid == self.sink_nid:
+            if not self.dtls_session:
+                self.establish_dtls_session()
+                # Handshake is async-ish (needs RTT). We probably can't send payload yet.
+                # For this simplified version, we might drop this packet or wait?
+                # Let's drop and print warning, user has to retry once connected.
+                print("[Router] DTLS Handshake initiated... try again in a moment.")
+                return False
+                
+            if self.dtls_session.state.value != 4: # ESTABLISHED
+                print("[Router] Waiting for DTLS Handshake to complete...")
+                return False
+                
+            # Encrypt
+            try:
+                record = self.dtls_session.send(payload)
+                self._route_data(self.my_nid, dest_nid, record, MsgType.DATA)
+                return True
+            except Exception as e:
+                print(f"[Router] Encrypt error: {e}")
+                return False
+        else:
+            # Direct/Plain
+            self._route_data(self.my_nid, dest_nid, payload)
         
         return True
 

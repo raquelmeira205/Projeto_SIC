@@ -32,7 +32,23 @@ class HeartbeatService:
             )
 
             print(f"[Sink] A enviar Heartbeat #{self.sequence_number}")
-            self.conn_manager.send_to_all_links(packet)
+            
+            # Send to all authenticated links
+            # Must iterate over keys to get MACs
+            # Use list() to avoid runtime error if dict changes size
+            if hasattr(self.conn_manager, 'session_keys'):
+                for mac in list(self.conn_manager.session_keys.keys()):
+                    # Heartbeats don't strictly need MAC (Node skips verification), 
+                    # but using send_authenticated_packet is consistent and handles sequence numbers.
+                    # Note: We pass original packet components to send_authenticated_packet
+                    # payload is hb_payload
+                    self.conn_manager.send_authenticated_packet(
+                        mac, 
+                        self.sink_nid, 
+                        b'\x00'*16, 
+                        MsgType.HEARTBEAT, 
+                        hb_payload
+                    )
 
             self.sequence_number += 1
             time.sleep(5) 

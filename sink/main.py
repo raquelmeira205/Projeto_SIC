@@ -101,24 +101,6 @@ class SinkConnectionManager:
         # REQUIRED FIX
         self.advertisement.register(ADAPTER_PATH)
 
-    def send_to_all_links(self, packet):
-        # Enviar para todos os dispositivos conectados que exponham o serviço SIC
-        # 1. Obter dispositivos conectados
-        # Iterar ObjectManager da BlueZ
-        try:
-            obj_manager = self.bus.get("org.bluez", "/")
-            objects = obj_manager.GetManagedObjects()
-            
-            for path, interfaces in objects.items():
-                if "org.bluez.Device1" in interfaces:
-                    props = interfaces["org.bluez.Device1"]
-                    if props.get("Connected", False):
-                        mac = props.get("Address")
-                        # Tentar enviar
-                        self._send_packet(mac, packet)
-                        
-        except Exception as e:
-            print(f"[Sink] Erro ao enviar heartbeats: {e}")
 
     def broadcast_crl(self):
         """Broadcast CURRENT CRL to all connected nodes."""
@@ -126,31 +108,66 @@ class SinkConnectionManager:
             return
 
         revoked_list = self.crl_manager.get_revoked_list()
+        # Even if empty, maybe we want to send it? But for now stick to previous logic.
         if not revoked_list:
-            return # Nothing to send
+            return 
             
         print(f"[Sink] Broadcasting CRL update ({len(revoked_list)} entries)...")
         
-        # Payload format: JSON bytes
         try:
             import json
             payload = json.dumps({"type": "crl", "revoked": revoked_list}).encode('utf-8')
             
-            # Send as CONTROL message
-            # For header construction, we need source NID (Sink) and dest (Broadcast/Neighbor)
-            # Since _send_packet uses connection MAC, we iterate connected links.
-            
-            packet = PacketHeader.pack(
-                self.sink_nid,
-                b'\xFF'*16, # Broadcast NID placeholder
-                MsgType.CONTROL,
-                payload
-            )
-            
-            self.send_to_all_links(packet)
+            # Send to all connected links individually with proper authentication
+            # Iterate sessions directly, as we only want to send to authenticated nodes
+            for mac, session_key in list(self.session_keys.items()):
+                 self.send_authenticated_packet(mac, self.sink_nid, b'\xFF'*16, MsgType.CONTROL, payload)
             
         except Exception as e:
             print(f"[Sink] Error broadcasting CRL: {e}")
+
+    def send_authenticated_packet(self, mac, src, dest, msg_type, payload):
+        """Encapsulate payload with hop-by-hop security (MAC + Seq) and send."""
+        if mac not in self.session_keys:
+             print(f"[Sink] Cannot send auth packet to {mac}: No session key")
+             return False
+             
+        key = self.session_keys[mac]
+        
+        # Initialize counter if needed (should come from handshake)
+        if mac not in self.replay_counters:
+             # This assumes we are sending. We need our own outgoing counter?
+             # SinkConnectionManager didn't have 'my_counters'. 
+             # We should add it or use a separate counter mechanism.
+             # For simplicity, let's add 'out_counters' to manager.
+             pass
+
+        # NOTE: The Router class separates 'replay_counters' (incoming) and 'my_counters' (outgoing).
+        # SinkConnectionManager seems to only have had 'replay_counters'.
+        # We need to track outgoing sequence numbers per-connection to avoid replay attacks on the Node side.
+        if not hasattr(self, 'out_counters'):
+             self.out_counters = {}
+             
+        if mac not in self.out_counters:
+             self.out_counters[mac] = 0
+             
+        self.out_counters[mac] += 1
+        seq = self.out_counters[mac]
+        
+        # 1. Pack with Zero MAC
+        temp_packet = PacketHeader.pack(src, dest, msg_type, payload, seq, b'\x00'*32)
+        
+        # 2. Calculate MAC
+        # We need generate_mac from common.crypto_utils
+        from common.crypto_utils import generate_mac
+        auth_mac = generate_mac(key, temp_packet)
+        
+        # 3. Final Pack
+        final_packet = PacketHeader.pack(src, dest, msg_type, payload, seq, auth_mac)
+        
+        # 4. Send
+        self._send_packet(mac, list(final_packet))
+        return True
 
     def _send_packet(self, mac, packet):
         # Lógica igual ao Node: obter char e escrever
@@ -331,6 +348,10 @@ class SinkConnectionManager:
             
             # Initialize replay counter for this new session
             self.replay_counters[peer_mac] = 0
+            # Initialize outgoing counter
+            if not hasattr(self, 'out_counters'):
+                 self.out_counters = {}
+            self.out_counters[peer_mac] = 0
             
             return session_key
         finally:

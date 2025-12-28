@@ -4,6 +4,7 @@ from common.packet_structs import PacketHeader, MsgType, HeartbeatPayload
 from common.crypto_utils import generate_mac, verify_mac
 from common.security_handshake import SecurityHandshake
 from common.ble_handshake_transport import BLEHandshakeTransport, handshake_receive_queue
+from common.crl_manager import CRLManager
 
 HEARTBEAT_INTERVAL = 5.0
 MAX_MISSED = 3
@@ -20,6 +21,8 @@ class Router:
         self.cert_path = cert_path
         self.key_path = key_path
         self.ca_cert_path = ca_cert_path
+
+        self.crl_manager = CRLManager("crl_node.json") # Nodes might have their own local copy
 
         self.forwarding_table = {}
         self.uplink_connection = None
@@ -150,6 +153,24 @@ class Router:
                 else:
                     # Regular routing
                     self._route_data(src, dest, payload)
+
+            elif mtype == MsgType.CONTROL:
+                # Handle Control Messages (e.g. CRL Updates)
+                try:
+                    import json
+                    data = json.loads(payload.decode('utf-8'))
+                    if data.get("type") == "crl":
+                        revoked = data.get("revoked", [])
+                        if self.crl_manager:
+                            print(f"[Router] Received CRL Update with {len(revoked)} entries")
+                            if self.crl_manager.update_from_list(revoked):
+                                # If any change, propagate to downlinks
+                                print("[Router] Forwarding CRL update to downlinks...")
+                                for child in self.downlink_connections:
+                                    # Forward original payload
+                                    self._send_authenticated_packet(child, src, b'\xFF'*16, MsgType.CONTROL, payload)
+                except Exception as e:
+                    print(f"[Router] Error processing CONTROL message: {e}")
 
         except Exception as e:
             print(f"Packet Error: {e}")
@@ -316,7 +337,7 @@ class Router:
         
         try:
             # Create handshake instance
-            handshake = SecurityHandshake(self.cert_path, self.key_path, self.ca_cert_path)
+            handshake = SecurityHandshake(self.cert_path, self.key_path, self.ca_cert_path, self.crl_manager)
             
             # Perform handshake
             handshake.perform_handshake(transport)

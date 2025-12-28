@@ -16,6 +16,7 @@ from common.packet_structs import PacketHeader, MsgType
 from common.crypto_utils import verify_mac
 from common.security_handshake import SecurityHandshake
 from common.ble_handshake_transport import handshake_receive_queue
+from common.crl_manager import CRLManager
 from sink.heartbeat_service import HeartbeatService
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -47,10 +48,11 @@ class RealSecurity:
         return signature
 
 class SinkConnectionManager:
-    def __init__(self, sink_nid_bytes, cert_path, key_path, ca_cert_path):
+    def __init__(self, sink_nid_bytes, cert_path, key_path, ca_cert_path, crl_manager=None):
         self.sink_nid = sink_nid_bytes
         self.advertisement = None
         self.bus = BUS
+        self.crl_manager = crl_manager
         
         # Certificate paths for handshake
         self.cert_path = cert_path
@@ -127,6 +129,38 @@ class SinkConnectionManager:
                         
         except Exception as e:
             print(f"[Sink] Erro ao enviar heartbeats: {e}")
+
+    def broadcast_crl(self):
+        """Broadcast CURRENT CRL to all connected nodes."""
+        if not self.crl_manager:
+            return
+
+        revoked_list = self.crl_manager.get_revoked_list()
+        if not revoked_list:
+            return # Nothing to send
+            
+        print(f"[Sink] Broadcasting CRL update ({len(revoked_list)} entries)...")
+        
+        # Payload format: JSON bytes
+        try:
+            import json
+            payload = json.dumps({"type": "crl", "revoked": revoked_list}).encode('utf-8')
+            
+            # Send as CONTROL message
+            # For header construction, we need source NID (Sink) and dest (Broadcast/Neighbor)
+            # Since _send_packet uses connection MAC, we iterate connected links.
+            
+            packet = PacketHeader.pack(
+                self.sink_nid,
+                b'\xFF'*16, # Broadcast NID placeholder
+                MsgType.CONTROL,
+                payload
+            )
+            
+            self.send_to_all_links(packet)
+            
+        except Exception as e:
+            print(f"[Sink] Error broadcasting CRL: {e}")
 
     def _send_packet(self, mac, packet):
         # Lógica igual ao Node: obter char e escrever
@@ -268,7 +302,7 @@ class SinkConnectionManager:
         handshake_receive_queue.register_transport(peer_mac, transport)
         
         try:
-            handshake = SecurityHandshake(self.cert_path, self.key_path, self.ca_cert_path)
+            handshake = SecurityHandshake(self.cert_path, self.key_path, self.ca_cert_path, self.crl_manager)
             handshake.perform_handshake(transport)
             session_key = handshake.session_key
             
@@ -542,7 +576,8 @@ def main():
     t_glib.start()
     
     # 2. Managers
-    conn_manager = SinkConnectionManager(sink_nid, args.cert, args.key, args.ca)
+    crl_manager = CRLManager("crl.json")
+    conn_manager = SinkConnectionManager(sink_nid, args.cert, args.key, args.ca, crl_manager)
     security = RealSecurity(args.key)
     
     # 3. Heartbeat Service
@@ -554,7 +589,17 @@ def main():
     
     # Start
     conn_manager.start_advertising()
+    conn_manager.start_advertising()
     hb_service.start()
+    
+    # 5. CRL Broadcast Service (Periodic)
+    def crl_broadcast_loop():
+        while True:
+            time.sleep(30) # Broadcast every 30 seconds
+            conn_manager.broadcast_crl()
+            
+    t_crl = threading.Thread(target=crl_broadcast_loop, daemon=True)
+    t_crl.start()
     
     print("[Sink] Sink a correr. Pressione Ctrl+C para sair.")
     

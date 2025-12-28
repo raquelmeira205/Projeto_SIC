@@ -4,11 +4,12 @@ from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 
 class SecurityHandshake:
-    def __init__(self, cert_path, key_path, ca_cert_path):
+    def __init__(self, cert_path, key_path, ca_cert_path, crl_manager=None):
         # Carrega certificado, chave privada e CA
         self.cert = self._load_cert(cert_path)
         self.private_key = self._load_key(key_path)
         self.ca_cert = self._load_cert(ca_cert_path)
+        self.crl_manager = crl_manager
 
         # Estado do handshake
         self.peer_cert = None
@@ -49,6 +50,11 @@ class SecurityHandshake:
             )
         except Exception as e:
             raise ValueError(f"Falha ao verificar certificado: {e}")
+
+        # CRL Check
+        if self.crl_manager:
+            if self.crl_manager.is_revoked(self.peer_cert.serial_number):
+                raise ValueError(f"CERTIFICADO REVOGADO! Serial: {self.peer_cert.serial_number}")
 
         return True
 

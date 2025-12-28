@@ -289,11 +289,24 @@ No CLI do Node:
 - [x] Characteristic caching no Sink (otimização)
 - [x] Inbox Service no Sink com verificação de segurança
 - [x] **DTLS End-to-End Security**
-  - [x] Handshake DTLS com autenticação mútua
-  - [x] Cifra AES-128-GCM para dados de aplicação
-  - [x] Anti-replay com janela deslizante (64 bits)
-  - [x] Derivação de chaves via ECDH + HKDF
-  - [x] Integração com Router (transparente)
+  - Handshake DTLS com autenticação mútua
+  - Cifra AES-128-GCM para dados de aplicação
+  - Anti-replay com janela deslizante (64 bits)
+  - Derivação de chaves via ECDH + HKDF
+  - Integração com Router (transparente)
+- [x] **Completar Informação da UI**
+  - Mostrar lista de downlinks e seus NIDs
+  - Display do contador de heartbeats perdidos
+  - Mostrar contador de mensagens roteadas
+- [x] **Implementar Inbox Service**
+  - Criar serviço no Sink para receber mensagens
+  - Display de mensagens com NID do remetente
+  - Permitir Nodes enviar mensagens para o Sink
+  - Verificação de MAC e replay protection
+- [x] **Revogação de Certificados**
+  - Lista de NIDs/serials revogados
+  - Distribuição via mensagens de controlo do Sink
+  - Verificação de revogação antes de aceitar conexões
 
 ### 📋 Por Fazer (Prioridades)
 
@@ -306,11 +319,6 @@ No CLI do Node:
   - Investigar timing issues no BLE connection establishment
 
 #### 🟠 ALTA
-- [x] ~~**Implementar Inbox Service**~~
-  - ~~Criar serviço no Sink para receber mensagens~~
-  - ~~Display de mensagens com NID do remetente~~
-  - ~~Permitir Nodes enviar mensagens para o Sink~~
-  - ~~Verificação de MAC e replay protection~~
 - [ ] **Verificar Heartbeat Timeout Chain**
   - Confirmar se propagação de timeouts está implementada
   - Testar cascata de desconexões em cadeia
@@ -319,20 +327,12 @@ No CLI do Node:
 - [ ] **Network Control para Simulação**
   - Adicionar controlo para simular perda de heartbeats
   - Permitir teste de resiliência em links específicos
-- [x] ~~**Completar Informação da UI**~~
-  - ~~Mostrar lista de downlinks e seus NIDs~~
-  - ~~Display do contador de heartbeats perdidos~~
-  - ~~Mostrar contador de mensagens roteadas~~
 
 #### 🟢 EXTRAS
 - [ ] **Suporte a Múltiplos Sinks**
   - Deteção automática de mudança de Sink
   - Renegociação de DTLS quando Sink atual deixa de ser válido
   - Failover automático entre Sinks
-- [ ] **Revogação de Certificados**
-  - Lista de NIDs/serials revogados
-  - Distribuição via mensagens de controlo do Sink
-  - Verificação de revogação antes de aceitar conexões
 - [ ] **Rate Limiting por NID**
   - Mitigar flooding attacks
   - Proteção adicional contra replay dentro dos limites de MACs

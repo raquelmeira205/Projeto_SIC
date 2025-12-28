@@ -27,6 +27,8 @@ class Router:
         self.forwarding_table = {}
         self.uplink_connection = None
         self.downlink_connections = set()
+
+        self.blocked_downlinks = set()
         
         # Link Layer Security State
         # Map: connection_handle -> session_key (bytes)
@@ -248,6 +250,8 @@ class Router:
         # NOTE: Header MAC is 0x00*16 for addr? No, src/dest are just headers.
         # But we must send to each child individually to sign correctly.
         for child in self.downlink_connections:
+            if child in self.blocked_downlinks:
+                continue 
             self._send_authenticated_packet(child, b'\x00'*16, b'\x00'*16, MsgType.HEARTBEAT, payload)
 
     def _monitor_heartbeat_timeout(self):
@@ -354,3 +358,22 @@ class Router:
             
         finally:
             handshake_receive_queue.unregister_transport(connection_mac)
+
+    def toggle_heartbeat_block(self, child_conn):
+        """Ativa/Desativa o envio de heartbeats para um filho específico."""
+        if child_conn in self.blocked_downlinks:
+            self.blocked_downlinks.remove(child_conn)
+            print(f"[Network Control] Heartbeats RESTAURADOS para {child_conn}")
+            return False # Retorna False (não bloqueado)
+        else:
+            self.blocked_downlinks.add(child_conn)
+            print(f"[Network Control] Heartbeats BLOQUEADOS para {child_conn}")
+            return True # Retorna True (bloqueado)
+
+    def get_downlinks_status(self):
+        """Retorna lista de filhos e seu estado de bloqueio para a UI."""
+        status = []
+        for child in self.downlink_connections:
+            is_blocked = child in self.blocked_downlinks
+            status.append((child, is_blocked))
+        return status

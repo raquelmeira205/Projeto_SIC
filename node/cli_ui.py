@@ -70,6 +70,8 @@ class NodeCLI:
                     self._cmd_status()
                 elif command == "stats":
                     self._cmd_stats()
+                elif command == "netctrl":  
+                    self._cmd_network_control()
                 elif command == "send":
                     self._cmd_send(args)
                 elif command == "quit" or command == "exit":
@@ -94,6 +96,7 @@ class NodeCLI:
         print("  connect <MAC>     - Connect to device by MAC address (XX:XX:XX:XX:XX:XX)")
         print("  status            - Show current node status")
         print("  stats             - Show statistics")
+        print("  netctrl           - Network Control (Simulate Failures)")
         print("  send <message>    - Send message to sink")
         print("  help              - Show this help message")
         print("  quit              - Exit application")
@@ -282,6 +285,52 @@ class NodeCLI:
             print("  No messages received yet")
         
         print("="*60 + "\n")
+        
+    def _cmd_network_control(self):
+        """Menu to simulate link failures by blocking heartbeats"""
+        print("\n" + "="*60)
+        print("NETWORK CONTROL - FAILURE SIMULATION")
+        print("="*60)
+        
+        # Check if router has the necessary methods
+        if not hasattr(self.node.router, 'get_downlinks_status'):
+            print("Error: Router does not support network control features.")
+            print("Please update node/router.py first.")
+            return
+
+        children = self.node.router.get_downlinks_status()
+        
+        if not children:
+            print("[!] No downlinks connected. Cannot simulate failure.")
+            return
+
+        print("Select a downlink to BLOCK/UNBLOCK heartbeats:")
+        print("Blocking heartbeats simulates a broken link to that device.")
+        print("-" * 60)
+        
+        for i, (mac, is_blocked) in enumerate(children):
+            state = "[BLOCKED ❌]" if is_blocked else "[ACTIVE ✅]"
+            print(f"  {i}) {mac} {state}")
+        print("-" * 60)
+
+        try:
+            sel = input("\nEnter index to toggle (or Enter to cancel): ")
+            if sel.strip() == "": return
+            
+            idx = int(sel)
+            if 0 <= idx < len(children):
+                target_mac = children[idx][0]
+                blocked = self.node.router.toggle_heartbeat_block(target_mac)
+                
+                if blocked:
+                    print(f"\n[!!!] Heartbeats BLOCKED for {target_mac}.")
+                    print("      The child node should detect timeout in ~15s.")
+                else:
+                    print(f"\n[OK] Heartbeats RESTORED for {target_mac}.")
+            else:
+                print("Invalid index.")
+        except ValueError:
+            print("Invalid input.")
     
     def _cmd_send(self, message):
         """Send message to sink"""

@@ -269,7 +269,10 @@ No CLI do Node:
 ```
 > scan
 > connect 0
+> send Olá Mundo!
 ```
+
+O comando `send` inicia automaticamente o handshake DTLS se necessário. A primeira mensagem é colocada em fila e enviada assim que o canal seguro estiver estabelecido.
 
 ---
 
@@ -295,7 +298,9 @@ No CLI do Node:
   - Cifra AES-128-GCM para dados de aplicação
   - Anti-replay com janela deslizante (64 bits)
   - Derivação de chaves via ECDH + HKDF
+  - Derivação de chaves via ECDH + HKDF
   - Integração com Router (transparente)
+  - **Message Queuing**: Mensagens enviadas durante o handshake são armazenadas e enviadas automaticamente após estabelecimento da sessão.
 - [x] **Completar Informação da UI**
   - Mostrar lista de downlinks e seus NIDs
   - Display do contador de heartbeats perdidos
@@ -316,13 +321,14 @@ No CLI do Node:
   - O sistema agora aceita pedidos de emparelhamento do BlueZ ("Just Works") automaticamente
   - Evita desconexões por "Authentication Failed" no nível do GATT
 
+- [x] **Fix: Sink crash quando Node se desliga**
+  - Sink "tripa" quando um Node desconecta abruptamente
+  - Implementar gestão robusta de desconexões
 
 ### 📋 Por Fazer (Prioridades)
 
 #### 🔴 CRÍTICO
-- [x] **Fix: Sink crash quando Node se desliga**
-  - Sink "tripa" quando um Node desconecta abruptamente
-  - Implementar gestão robusta de desconexões
+
 
 
 #### 🟠 ALTA

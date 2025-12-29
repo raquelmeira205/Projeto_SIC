@@ -56,6 +56,8 @@ class Router:
         
         # DTLS Session
         self.dtls_session = None
+        # Queue for packets waiting for DTLS handshake: list of (dest_nid, payload)
+        self.pending_dtls_packets = []
 
         threading.Thread(target=self._monitor_heartbeat_timeout, daemon=True).start()
 
@@ -108,14 +110,14 @@ class Router:
             if not self.dtls_session:
                 self.establish_dtls_session()
                 # Handshake is async-ish (needs RTT). We probably can't send payload yet.
-                # For this simplified version, we might drop this packet or wait?
-                # Let's drop and print warning, user has to retry once connected.
-                print("[Router] DTLS Handshake initiated... try again in a moment.")
-                return False
+                print("[Router] DTLS Handshake initiated... Queueing packet.")
+                self.pending_dtls_packets.append((dest_nid, payload))
+                return True
                 
             if self.dtls_session.state.value != 4: # ESTABLISHED
-                print("[Router] Waiting for DTLS Handshake to complete...")
-                return False
+                print("[Router] DTLS Handshake in progress... Queueing packet.")
+                self.pending_dtls_packets.append((dest_nid, payload))
+                return True
                 
             # Encrypt
             try:
@@ -154,7 +156,16 @@ class Router:
             elif mtype == MsgType.DTLS_HANDSHAKE:
                 # Pass to DTLS Client
                 if self.dtls_session:
+                    prev_state = self.dtls_session.state.value
                     self.dtls_session.handle_handshake_message(payload)
+                    new_state = self.dtls_session.state.value
+                    
+                    # check for transition to ESTABLISHED (4)
+                    if prev_state != 4 and new_state == 4:
+                        print(f"[Router] DTLS Session Established! Flushing {len(self.pending_dtls_packets)} pending packets.")
+                        while self.pending_dtls_packets:
+                            p_dest, p_payload = self.pending_dtls_packets.pop(0)
+                            self.send_app_data(p_dest, p_payload)
             
             elif mtype == MsgType.DATA:
                 if src == self.sink_nid and self.dtls_session:

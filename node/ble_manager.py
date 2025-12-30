@@ -8,6 +8,7 @@ from common.ble_utils import (
     SIC_RX_CHAR_UUID,
 )
 from common.bluez_classes import Advertisement
+import simplepy_ble_client
 
 
 class BLEManager:
@@ -27,6 +28,8 @@ class BLEManager:
 
         # índice único DBus (evita colisões)
         self.adv_index = node_nid[-1]
+
+        self.client = simplepy_ble_client.SimplePyBleClient()
 
     # ------------------------------------------------------------------
     # Callbacks Router
@@ -80,138 +83,20 @@ class BLEManager:
     # ------------------------------------------------------------------
 
     def send_packet(self, dest_mac, packet):
-        device = get_device_object(dest_mac)
+        return self.client.write_packet(dest_mac, packet)
 
-        if not device or not device.Connected:
-            if not self.connect_to_device(dest_mac):
-                return False
-
-        # Wait for services to be discovered
-        try:
-            if not device.ServicesResolved:
-                # Only print if we are actually going to wait
-                if not get_gatt_characteristic(dest_mac, SIC_RX_CHAR_UUID):
-                    print(f"[BLE] Waiting for service discovery on {dest_mac}...")
-                    import time
-                    for i in range(20):  # Wait up to 2 seconds
-                        time.sleep(0.1)
-                        if device.ServicesResolved or get_gatt_characteristic(dest_mac, SIC_RX_CHAR_UUID):
-                            # print(f"[BLE] Ready for {dest_mac}")
-                            break
-                    else:
-                        print(f"[BLE] Warning: Services not resolved for {dest_mac}, attempting anyway...")
-        except:
-            pass  # Property might not exist
-
-        char = get_gatt_characteristic(dest_mac, SIC_RX_CHAR_UUID)
-        if not char:
-            return False
-
-        try:
-            char.WriteValue(packet, {})
-            return True
-        except Exception:
-            return False
-
-    def write_value(self, mac, data):
-       
-        return self.send_packet(mac, data)
 
     # ------------------------------------------------------------------
     # Conexões
     # ------------------------------------------------------------------
 
     def connect_to_device(self, mac):
-        import time
-        from gi.repository import GLib
-        
-        # Wait for device to appear in D-Bus (from scan)
-        max_wait = 5
-        device = None
-        for i in range(max_wait):
-            device = get_device_object(mac)
-            if device:
-                break
-            print(f"[*] Aguardando dispositivo aparecer no D-Bus... ({i+1}/{max_wait})")
-            time.sleep(1)
-        
-        if not device:
-            print(f"[!] Dispositivo {mac} não encontrado no D-Bus")
-            return False
-
-        try:
-            # Check if already connected
-            if hasattr(device, 'Connected') and device.Connected:
-                print(f"[*] Já conectado a {mac}")
-                return True
-            
-            print(f"[*] Conectando a {mac} via BLE...")
-            
-            # Try to connect using the adapter's ConnectDevice method for LE
-            connection_initiated = False
-            try:
-                adapter = BUS.get("org.bluez", ADAPTER_PATH)
-                # Use ConnectDevice with address type for LE connections
-                properties = {
-                    'Address': GLib.Variant('s', mac),
-                    'AddressType': GLib.Variant('s', 'public')  # Force LE public address
-                }
-                result = adapter.ConnectDevice(properties)
-                print(f"[*] ConnectDevice retornou: {result}")
-                connection_initiated = True
-            except Exception as e:
-                error_msg = str(e)
-                # If it returns an object path, that's actually success!
-                if 'returned type' in error_msg and '(o)' in error_msg:
-                    print(f"[*] ConnectDevice iniciou conexão (object path retornado)")
-                    connection_initiated = True
-                else:
-                    print(f"[!] ConnectDevice falhou: {e}")
-                    # Fallback to direct Connect
-                    try:
-                        device.Connect()
-                        connection_initiated = True
-                    except Exception as e2:
-                        # Check if error is "already in progress" which means connection is happening
-                        if 'InProgress' in str(e2) or 'busy' in str(e2).lower():
-                            print(f"[*] Conexão já em progresso")
-                            connection_initiated = True
-                        else:
-                            print(f"[!] Connect também falhou: {e2}")
-            
-            if not connection_initiated:
-                return False
-            
-            # Wait for connection to establish
-            print(f"[*] Aguardando conexão estabelecer...")
-            for i in range(15):  # Increased timeout
-                time.sleep(0.5)
-                device = get_device_object(mac)  # Refresh device object
-                if device and hasattr(device, 'Connected') and device.Connected:
-                    print(f"[*] ✓ Conexão estabelecida com {mac}")
-                    return True
-            
-            print(f"[!] Timeout aguardando conexão, mas pode estar conectado")
-            # Check one last time
-            device = get_device_object(mac)
-            if device and hasattr(device, 'Connected') and device.Connected:
-                print(f"[*] ✓ Conexão confirmada!")
-                return True
-            
-            return False
-            
-        except Exception as e:
-            print(f"[!] Erro conexão {mac}: {e}")
-            return False
+        return self.simple_client.connect(mac)
 
 
     def disconnect_from_device(self, mac):
-        device = get_device_object(mac)
-        if not device:
-            return False
-
         try:
-            device.Disconnect()
+            self.simple_client.disconnect(mac)
 
             if mac == self.uplink_addr:
                 self.trigger_chain_disconnection()

@@ -8,7 +8,7 @@ from common.ble_utils import (
     SIC_RX_CHAR_UUID,
 )
 from common.bluez_classes import Advertisement
-import simplepy_client
+import simplepy_ble_client
 
 
 class BLEManager:
@@ -29,7 +29,7 @@ class BLEManager:
         # índice único DBus (evita colisões)
         self.adv_index = node_nid[-1]
 
-        self.client = simplepy_client.SimplePyBleClient()
+        self.client = simplepy_ble_client.SimplePyBleClient()
 
     # ------------------------------------------------------------------
     # Callbacks Router

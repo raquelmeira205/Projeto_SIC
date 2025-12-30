@@ -129,9 +129,16 @@ class BLEManager:
             for dev in devices:
                 hop = dev.get("hop_count", -1)
                 if hop >= 0:  # Only include valid SIC devices
+                    mac = dev["mac"]
+
+                    # CACHE do peripheral para o SimplePyBleClient
+                    peripheral = dev.get("peripheral")
+                    if peripheral is not None:
+                        self.client.peripherals_by_mac[mac] = peripheral
+
                     result.append(
                         {
-                            "mac": dev["mac"],
+                            "mac": mac,
                             "name": dev.get("name", "Unknown"),
                             "hop_count": hop,
                             "rssi": dev.get("rssi", 0),
@@ -139,7 +146,7 @@ class BLEManager:
                         }
                     )
                     print(
-                        f"  Found: {dev['mac']} | Hop:{hop} | "
+                        f"  Found: {mac} | Hop:{hop} | "
                         f"RSSI:{dev.get('rssi', 0)}"
                     )
 

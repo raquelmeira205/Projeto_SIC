@@ -154,7 +154,8 @@ class BLEManager:
             # Try to connect using the adapter's ConnectDevice method for LE
             connection_initiated = False
             try:
-                adapter = BUS.get("org.bluez", ADAPTER_PATH)
+                # Access the correct D-Bus interface
+                adapter = BUS.get("org.bluez", ADAPTER_PATH)['org.bluez.Adapter1']
                 # Use ConnectDevice with address type for LE connections
                 properties = {
                     'Address': GLib.Variant('s', mac),
@@ -164,24 +165,18 @@ class BLEManager:
                 print(f"[*] ConnectDevice retornou: {result}")
                 connection_initiated = True
             except Exception as e:
-                error_msg = str(e)
-                # If it returns an object path, that's actually success!
-                if 'returned type' in error_msg and '(o)' in error_msg:
-                    print(f"[*] ConnectDevice iniciou conexão (object path retornado)")
+                print(f"[!] ConnectDevice falhou: {e}")
+                # Fallback to direct Connect
+                try:
+                    device.Connect()
                     connection_initiated = True
-                else:
-                    print(f"[!] ConnectDevice falhou: {e}")
-                    # Fallback to direct Connect
-                    try:
-                        device.Connect()
+                except Exception as e2:
+                    # Check if error is "already in progress" which means connection is happening
+                    if 'InProgress' in str(e2) or 'busy' in str(e2).lower():
+                        print(f"[*] Conexão já em progresso")
                         connection_initiated = True
-                    except Exception as e2:
-                        # Check if error is "already in progress" which means connection is happening
-                        if 'InProgress' in str(e2) or 'busy' in str(e2).lower():
-                            print(f"[*] Conexão já em progresso")
-                            connection_initiated = True
-                        else:
-                            print(f"[!] Connect também falhou: {e2}")
+                    else:
+                        print(f"[!] Connect também falhou: {e2}")
             
             if not connection_initiated:
                 return False
@@ -193,6 +188,12 @@ class BLEManager:
                 device = get_device_object(mac)  # Refresh device object
                 if device and hasattr(device, 'Connected') and device.Connected:
                     print(f"[*] ✓ Conexão estabelecida com {mac}")
+                    
+                    # Re-advertise to remain discoverable for other nodes
+                    # This is critical for multi-hop topology
+                    print(f"[*] Re-advertising to remain discoverable...")
+                    self.update_advertisement()
+                    
                     return True
             
             print(f"[!] Timeout aguardando conexão, mas pode estar conectado")
@@ -200,6 +201,11 @@ class BLEManager:
             device = get_device_object(mac)
             if device and hasattr(device, 'Connected') and device.Connected:
                 print(f"[*] ✓ Conexão confirmada!")
+                
+                # Re-advertise to remain discoverable for other nodes
+                print(f"[*] Re-advertising to remain discoverable...")
+                self.update_advertisement()
+                
                 return True
             
             return False

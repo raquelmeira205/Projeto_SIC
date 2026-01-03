@@ -320,33 +320,27 @@ O comando `send` inicia automaticamente o handshake DTLS se necessário. A prime
   - Resolvido com a implementação do **BLE Pairing Agent** (`common/ble_agent.py`)
   - O sistema agora aceita pedidos de emparelhamento do BlueZ ("Just Works") automaticamente
   - Evita desconexões por "Authentication Failed" no nível do GATT
-
 - [x] **Fix: Sink crash quando Node se desliga**
   - Sink "tripa" quando um Node desconecta abruptamente
   - Implementar gestão robusta de desconexões
+- [x] **Suporte a Múltiplos Sinks**
+  - Deteção automática de mudança de Sink
+  - Renegociação de DTLS quando Sink atual deixa de ser válido
+  - Failover automático entre Sinks
+- [x] **Rate Limiting por NID**
+  - Mitigar flooding attacks
+  - Proteção adicional contra replay dentro dos limites de MACs
+  - Limites configuráveis por tipo de mensagem
 
 ### 📋 Por Fazer (Prioridades)
-
-#### 🔴 CRÍTICO
-
-
-
-#### 🟠 ALTA
 
 #### 🟡 MÉDIA
 - [ ] **Network Control para Simulação**
   - Adicionar controlo para simular perda de heartbeats
   - Permitir teste de resiliência em links específicos
 
-#### 🟢 EXTRAS
-- [ ] **Suporte a Múltiplos Sinks**
-  - Deteção automática de mudança de Sink
-  - Renegociação de DTLS quando Sink atual deixa de ser válido
-  - Failover automático entre Sinks
-- [ ] **Rate Limiting por NID**
-  - Mitigar flooding attacks
-  - Proteção adicional contra replay dentro dos limites de MACs
-  - Limites configuráveis por tipo de mensagem
+
+
 
 ## 🏗️ Arquitetura Técnica
 
@@ -393,5 +387,9 @@ Manufacturer Data (Company ID 0xFFFE):
 ---
 
 ## 👥 Autores
+Íris Biaguê 119251
+Isabela Pereira 119931
+Joana Santiago 119705
+Raquel Meira 118928
 
 Projeto desenvolvido no âmbito da disciplina de Segurança Informática e nas Comunicações.

@@ -24,6 +24,10 @@ class BLEManager:
 
         self.router_callback_connect = None
         self.router_callback_disconnect = None
+        
+        # Multiple Sinks / Failover
+        self.uplink_candidates = [] # List of tuples: (mac, name, hop, rssi, nid)
+        self.current_candidate_index = 0
 
         # índice único DBus (evita colisões)
         self.adv_index = node_nid[-1]
@@ -298,23 +302,55 @@ class BLEManager:
             print("[!] Nenhum uplink encontrado")
             return False
 
-        # menor hop, melhor RSSI
-        best = min(candidates, key=lambda d: (d[2], -d[3]))
-        mac, name, hop, rssi, nid = best
+        # Sort: lowest hop first (d[2]), then highest RSSI (-d[3])
+        # candidates item: (mac, name, hop, rssi, nid)
+        self.uplink_candidates = sorted(candidates, key=lambda d: (d[2], -d[3]))
+        
+        print(f"[*] Found {len(self.uplink_candidates)} candidates.")
+        for i, c in enumerate(self.uplink_candidates):
+            print(f"  [{i}] {c[1]} ({c[0]}) Hop={c[2]} RSSI={c[3]}")
 
-        print(f"[*] Uplink escolhido: {name} {mac} (hop={hop}, rssi={rssi})")
+        self.current_candidate_index = 0
+        return self._try_connect_next_candidate()
 
-        if self.connect_to_device(mac):
-            self.uplink_addr = mac
-            self.uplink_nid = nid # Store NID
-            self.hop_count = hop + 1
-            self.update_advertisement()
+    def _try_connect_next_candidate(self):
+        """Helper to try connecting to the next available candidate."""
+        while self.current_candidate_index < len(self.uplink_candidates):
+            cand = self.uplink_candidates[self.current_candidate_index]
+            mac, name, hop, rssi, nid = cand
+            
+            print(f"[*] Tentando candidato {self.current_candidate_index + 1}/{len(self.uplink_candidates)}: {name} {mac} (hop={hop})")
+            
+            if self.connect_to_device(mac):
+                self.uplink_addr = mac
+                self.uplink_nid = nid
+                self.hop_count = hop + 1
+                self.update_advertisement()
 
-            if self.router_callback_connect:
-                self.router_callback_connect(mac, hop)
-
+                if self.router_callback_connect:
+                    self.router_callback_connect(mac, hop)
+                
+                return True
+            else:
+                print(f"[!] Falha ao conectar a {mac}. Tentando próximo...")
+                self.current_candidate_index += 1
+                
+        print("[!] Todos os candidatos falharam.")
+        self.uplink_candidates = []
+        return False
+    
+    def failover_uplink(self):
+        """Attempt to switch to the next best uplink without full rescan."""
+        print("[*] Iniciando Failover de Uplink...")
+        
+        # Advance index to skip the one that just failed/disconnected
+        self.current_candidate_index += 1
+        
+        if self._try_connect_next_candidate():
+            print("[*] Failover bem sucedido!")
             return True
-
+            
+        print("[!] Failover falhou. Necessário novo scan.")
         return False
 
     # ------------------------------------------------------------------
@@ -322,7 +358,13 @@ class BLEManager:
     # ------------------------------------------------------------------
 
     def trigger_chain_disconnection(self):
-        print("[!!!] Perda de uplink (Nível BLE)")
+        # Attempt failover first
+        if self.uplink_candidates and self.current_candidate_index < len(self.uplink_candidates) - 1:
+             print("[!] Perda de uplink detectada. Tentando failover...")
+             if self.failover_uplink():
+                 return
+                 
+        print("[!!!] Perda de uplink (Nível BLE) - Sem candidatos de failover")
 
         self.uplink_addr = None
         self.uplink_nid = None

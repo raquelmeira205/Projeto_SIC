@@ -22,6 +22,7 @@ from sink.heartbeat_service import HeartbeatService
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.backends import default_backend
+from sink.rate_limiter import RateLimiter
 
 ADAPTER_PATH = "/org/bluez/hci0"
 
@@ -68,6 +69,12 @@ class SinkConnectionManager:
         # DTLS
         from sink.dtls_server import DtlsServerManager
         self.dtls_manager = DtlsServerManager(sink_nid_bytes, cert_path, key_path, None)
+        
+        # Rate Limiting
+        self.rate_limiter = RateLimiter()
+
+        
+        # Characteristic cache to avoid repeated lookups
 
 
         
@@ -472,6 +479,13 @@ class RxCharacteristic(Characteristic):
             
             # Update sequence number
             self.conn_manager.replay_counters[mac] = seq_num
+            
+            # 3. Rate Limiting Check (After Authentication)
+            # Use src_nid for limiting as requested
+            if not self.conn_manager.rate_limiter.check_rate_limit(src_nid, msg_type):
+                 # Log periodically or just print
+                 print(f"[Sink] Rate Limit Exceeded for Node {src_nid.hex()[:8]} (Type {msg_type})")
+                 return
             
             if msg_type == MsgType.DTLS_HANDSHAKE:
                  # Handshake Packet (Unencrypted or Encrypted Handshake msg)

@@ -74,10 +74,16 @@ class Router:
         if connection_handle not in self.link_keys:
              # Perform handshake to establish session key
              try:
-                 session_key = self.perform_handshake(connection_handle, is_initiator=True)
+                 session_key, peer_cert = self.perform_handshake(connection_handle, is_initiator=True)
                  self.link_keys[connection_handle] = session_key
                  self.my_counters[connection_handle] = 0
                  self.replay_counters[connection_handle] = 0
+                 
+                 # Multiple Sinks: If we connected directly to a Sink (hops=0), update trusted cert
+                 if hops == 0 and peer_cert:
+                     print(f"[Router] Connected directly to Sink {connection_handle}. Updating Trusted Cert.")
+                     self.security.update_sink_cert(peer_cert)
+                     
                  print(f"[Router] Handshake com uplink {connection_handle} concluído")
              except Exception as e:
                  print(f"[!] Handshake falhou com {connection_handle}: {e}")
@@ -258,8 +264,14 @@ class Router:
             self.hops_to_sink = 1
             self.ble.update_advertisement()
 
-        # Capturar Sink NID
+        # Capturar Sink NID e detetar Mudança de Sink
         if self.sink_nid != src_nid:
+             if self.sink_nid is not None:
+                 print(f"[Router] Sink Changed! {self.sink_nid.hex()[:8]} -> {src_nid.hex()[:8]}")
+                 print("[Router] Resetting End-to-End DTLS Session due to Sink Change.")
+                 self.dtls_session = None # Reset session
+                 self.pending_dtls_packets = [] # Warning: Dropping pending packets for old sinK
+                 
              self.sink_nid = src_nid
 
         seq, sig = HeartbeatPayload.unpack(payload)
@@ -352,7 +364,7 @@ class Router:
             is_initiator: True if we initiate the handshake
             
         Returns:
-            bytes: 32-byte session key
+            tuple: (session_key, peer_cert)
             
         Raises:
             Exception if handshake fails
@@ -381,7 +393,7 @@ class Router:
             
             print(f"[Handshake] Concluído com {connection_mac}: {session_key[:8].hex()}...")
             
-            return session_key
+            return session_key, handshake.peer_cert
             
         finally:
             handshake_receive_queue.unregister_transport(connection_mac)

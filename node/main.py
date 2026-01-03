@@ -44,6 +44,12 @@ class RealSecurity:
             print(f"[!] Signature verification failed: {e}")
             return False
 
+    def update_sink_cert(self, new_cert):
+        """Update the trusted Sink certificate/public key."""
+        self.sink_cert = new_cert
+        self.sink_public_key = new_cert.public_key()
+        print("[Security] Safe Sink Certificate updated dynamically.")
+
 
 class RxCharacteristic(Characteristic):
     def __init__(self, bus, index, service, router):

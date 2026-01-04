@@ -68,20 +68,26 @@ class RxCharacteristic(Characteristic):
                 chunk_index = int.from_bytes(data[5:7], 'big')
                 chunk_data = data[7:]
                 
-                # Route to handshake queue if it's a handshake message
+                print(f"[RX-Handshake] Chunk {chunk_index} from {mac}")
+                
+                # If this is the first chunk from an unknown MAC, trigger incoming handshake FIRST
+                # This will register the transport so route_chunk will work
+                if (chunk_index == 0 and 
+                    mac not in self.router.link_keys and 
+                    not handshake_receive_queue.has_transport(mac)):
+                    print(f"[RX-Handshake] First chunk from unknown peer {mac}, triggering handshake response")
+                    self.router.handle_incoming_handshake(mac)
+                    # Give thread time to register transport
+                    import time
+                    time.sleep(0.1)
+                
+                # Now route the chunk (transport should be registered by now)
                 if handshake_receive_queue.route_chunk(mac, total_length, chunk_index, chunk_data):
-                    # This was a handshake message, don't process as regular packet
-                    print(f"[RX-Handshake] Chunk {chunk_index} from {mac}")
-                    
-                    # If this is the first chunk from an unknown MAC, trigger incoming handshake
-                    # BUT only if we don't already have a handshake in progress (no transport registered)
-                    if (chunk_index == 0 and 
-                        mac not in self.router.link_keys and 
-                        not handshake_receive_queue.has_transport(mac)):
-                        print(f"[RX-Handshake] First chunk from unknown peer {mac}, triggering handshake response")
-                        self.router.handle_incoming_handshake(mac)
-                    
                     return
+                else:
+                    print(f"[!] Warning: Could not route handshake chunk {chunk_index} from {mac}")
+                    return
+                    
             except Exception as e:
                 print(f"[!] Error parsing handshake frame: {e}")
                 pass  # Not handshake data, process normally

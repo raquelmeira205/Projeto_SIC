@@ -380,7 +380,6 @@ Manufacturer Data (Company ID 0xFFFE):
 - ✅ **Rogue Nodes**: Apenas nodes com certificados válidos podem conectar
 
 ### Ameaças Não Mitigadas
-- ⚠️ **DoS via flooding**: Sem rate limiting implementado
 - ⚠️ **Sybil attacks**: Sem limite de conexões por dispositivo
 - ⚠️ **Physical attacks**: Sem proteção se chave privada for extraída
 

@@ -424,17 +424,20 @@ class Router:
             
             # Get session key
             session_key = handshake.session_key
+            print(f"[Handshake-Debug] Raw session_key type: {type(session_key)}, value: {session_key if not isinstance(session_key, bytes) else session_key[:16].hex() + '...'}")
             
             # Validate and fix type if needed
             if isinstance(session_key, tuple):
-                print(f"[Handshake-Warning] session_key is tuple, extracting first element")
+                print(f"[Handshake-Warning] session_key is tuple with {len(session_key)} elements")
+                print(f"[Handshake-Debug] Tuple contents: {[type(x) for x in session_key]}")
                 session_key = session_key[0] if session_key else None
+                print(f"[Handshake-Debug] After extraction: type={type(session_key)}")
             
             if not isinstance(session_key, bytes):
-                raise RuntimeError(f"Session key is not bytes! Type: {type(session_key)}")
+                raise RuntimeError(f"Session key is not bytes! Type: {type(session_key)}, Value: {session_key}")
             
             if not session_key or len(session_key) != 32:
-                raise RuntimeError("Invalid session key derived")
+                raise RuntimeError(f"Invalid session key derived: len={len(session_key) if session_key else 0}")
             
             print(f"[Handshake] Concluído com {connection_mac}: {session_key[:8].hex()}...")
             

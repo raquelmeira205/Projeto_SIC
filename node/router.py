@@ -342,7 +342,10 @@ class Router:
         failed_downlinks = []
         for child in list(self.downlink_connections): # Copy list to modify safe
             if child in self.blocked_downlinks:
-                continue 
+                print(f"[Network Control] Simulating send failure to {child} (BLOCKED)")
+                failed_downlinks.append(child)
+                continue
+                
             # Send heartbeat with correct Sink NID as source
             # Destination should be broadcast (all zeros) or the child's NID
             if not self._send_authenticated_packet(child, src_nid, b'\x00'*16, MsgType.HEARTBEAT, payload):

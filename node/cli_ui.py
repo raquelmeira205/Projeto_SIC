@@ -3,40 +3,53 @@ import time
 import sys
 
 class NodeCLI:
+    """
+    Interface de Linha de Comando (CLI) para interação com o Nó IoT.
+    Gerencia a entrada do usuário e exibe status e estatísticas do nó.
+    """
+
     def __init__(self, node_ref):
+        """
+        Inicializa a CLI.
+
+        :param node_ref: Referência para o objeto Node principal.
+        """
         self.node = node_ref
         self.running = True
         self.scan_results = []
         self.last_status_time = 0
         
     def start(self):
-        """Start the CLI interface"""
+        """
+        Inicia a interface de linha de comando.
+        Exibe o cabeçalho e inicia a thread de monitoramento e o loop de comandos.
+        """
         print("\n" + "="*60)
         print("SIC IoT Node - Command Line Interface")
         print("="*60)
         print(f"Node NID: {self.node.node_nid.hex()}")
         print("\nType 'help' for available commands\n")
         
-        # Start status monitor thread
         status_thread = threading.Thread(target=self._status_monitor, daemon=True)
         status_thread.start()
         
-        # Main command loop
         self._command_loop()
     
     def _status_monitor(self):
-        """Background thread to monitor and display periodic status"""
+        """
+        Thread em background para monitorar e exibir o status periodicamente.
+        """
         while self.running:
-            time.sleep(30)  # Update every 30 seconds
+            time.sleep(30)
             if self.running:
                 self._print_status_line()
     
     def _print_status_line(self):
-        """Print a one-line status update"""
+        """
+        Imprime uma linha de status atualizada com informações resumidas do nó.
+        """
         uplink = self.node.ble_manager.uplink_addr
         hop = self.node.ble_manager.hop_count
-        if hop == 255: hop = -1
-        
         downlinks = len(self.node.router.downlink_connections)
         lost_hb = self.node.router.stats['lost_heartbeats']
         routed = self.node.router.stats['routed_messages']
@@ -50,7 +63,9 @@ class NodeCLI:
         print("> ", end="", flush=True)
     
     def _command_loop(self):
-        """Main command input loop"""
+        """
+        Loop principal de processamento de comandos do usuário.
+        """
         while self.running:
             try:
                 cmd = input("> ").strip().lower()
@@ -91,7 +106,9 @@ class NodeCLI:
                 print(f"Error: {e}")
     
     def _cmd_help(self):
-        """Show available commands"""
+        """
+        Exibe a lista de comandos disponíveis.
+        """
         print("\nAvailable Commands:")
         print("  scan              - Scan for nearby BLE devices")
         print("  connect <index>   - Connect to device by index from scan results")
@@ -105,7 +122,9 @@ class NodeCLI:
         print()
     
     def _cmd_scan(self):
-        """Trigger BLE scan"""
+        """
+        Comando para iniciar a varredura BLE e exibir os resultados.
+        """
         print("Scanning for devices...")
         
         def scan_thread():
@@ -131,12 +150,15 @@ class NodeCLI:
         threading.Thread(target=scan_thread, daemon=True).start()
     
     def _cmd_connect(self, args):
-        """Connect to device by index or MAC address"""
+        """
+        Comando para conectar a um dispositivo, seja por índice ou endereço MAC.
+        
+        :param args: Argumentos do comando (índice ou MAC).
+        """
         if not args:
             print("Usage: connect <index|MAC>")
             return
         
-        # Check if it's a MAC address (contains colons)
         if ':' in args:
             mac = args.strip()
             name = mac
@@ -157,7 +179,6 @@ class NodeCLI:
             threading.Thread(target=connect_thread, daemon=True).start()
             return
         
-        # Otherwise treat as index
         try:
             index = int(args)
         except ValueError:
@@ -189,15 +210,15 @@ class NodeCLI:
         threading.Thread(target=connect_thread, daemon=True).start()
     
     def _cmd_status(self):
-        """Show current node status"""
+        """
+        Exibe o status atual do nó, incluindo informações de uplink, downlinks e estatísticas.
+        """
         print("\n" + "="*60)
         print("NODE STATUS")
         print("="*60)
         
-        # Basic info
         print(f"Node NID:     {self.node.node_nid.hex()}")
         
-        # Uplink
         uplink = self.node.ble_manager.uplink_addr
         uplink_nid = self.node.ble_manager.uplink_nid
         hop = self.node.ble_manager.hop_count
@@ -210,12 +231,10 @@ class NodeCLI:
             print(f"Uplink:       Disconnected")
             print(f"Hop Count:    {hop}")
         
-        # Downlinks
         downlink_connections = self.node.router.downlink_connections
         print(f"\nDownlinks:    {len(downlink_connections)} connection(s)")
         if downlink_connections:
             for conn_mac in downlink_connections:
-                # Try to find NID from forwarding table
                 nid = "Unknown"
                 for dest_nid, next_hop in self.node.router.forwarding_table.items():
                     if next_hop == conn_mac:
@@ -223,18 +242,15 @@ class NodeCLI:
                         break
                 print(f"  - {conn_mac} (NID: {nid})")
         
-        # Sink
         sink_nid = self.node.router.sink_nid
         print(f"\nSink NID:     {sink_nid.hex() if sink_nid else 'Unknown'}")
         
-        # Statistics
         stats = self.node.router.stats
         print(f"\n--- Statistics ---")
         print(f"Lost Heartbeats:  {stats['lost_heartbeats']}")
         print(f"Routed Messages:  {stats['routed_messages']}")
         print(f"Received Messages: {len(stats.get('received_messages', []))}")
         
-        # Forwarding table
         print(f"\n--- Forwarding Table ---")
         print(f"Total Entries: {len(self.node.router.forwarding_table)}")
         for dest, next_hop in list(self.node.router.forwarding_table.items())[:5]:
@@ -246,14 +262,15 @@ class NodeCLI:
         print("="*60 + "\n")
     
     def _cmd_stats(self):
-        """Show statistics"""
+        """
+        Exibe estatísticas detalhadas da rede e do nó.
+        """
         stats = self.node.router.stats
         
         print("\n" + "="*60)
         print("STATISTICS")
         print("="*60)
         
-        # Network Health
         print("--- Network Health ---")
         print(f"Lost Heartbeats:  {stats['lost_heartbeats']}")
         uplink = self.node.ble_manager.uplink_addr
@@ -262,19 +279,16 @@ class NodeCLI:
         else:
             print(f"Uplink Status:    Disconnected")
         
-        # Message Statistics
         print(f"\n--- Message Statistics ---")
         print(f"Routed Messages:  {stats['routed_messages']}")
         print(f"Received Messages: {len(stats.get('received_messages', []))}")
         
-        # Network Topology
         downlink_count = len(self.node.router.downlink_connections)
         print(f"\n--- Network Topology ---")
         print(f"Hop Count:        {self.node.ble_manager.hop_count}")
         print(f"Downlinks:        {downlink_count}")
         print(f"Forwarding Table: {len(self.node.router.forwarding_table)} entries")
         
-        # Show recent messages
         messages = stats.get('received_messages', [])
         if messages:
             print("\n--- Recent Messages ---")
@@ -289,12 +303,14 @@ class NodeCLI:
         print("="*60 + "\n")
         
     def _cmd_network_control(self):
-        """Menu to simulate link failures by blocking heartbeats"""
+        """
+        Menu para controle de rede (simulação de falhas).
+        Permite bloquear heartbeats de downlinks específicos.
+        """
         print("\n" + "="*60)
         print("NETWORK CONTROL - FAILURE SIMULATION")
         print("="*60)
         
-        # Check if router has the necessary methods
         if not hasattr(self.node.router, 'get_downlinks_status'):
             print("Error: Router does not support network control features.")
             print("Please update node/router.py first.")
@@ -335,7 +351,11 @@ class NodeCLI:
             print("Invalid input.")
     
     def _cmd_send(self, message):
-        """Send message to sink"""
+        """
+        Comando para enviar uma mensagem ao Sink.
+        
+        :param message: Conteúdo da mensagem a ser enviada.
+        """
         if not message:
             print("Usage: send <message>")
             return
@@ -353,7 +373,9 @@ class NodeCLI:
             print("✗ Failed to send message")
     
     def _cmd_quit(self):
-        """Exit the application"""
+        """
+        Encerra a aplicação CLI e o nó.
+        """
         print("\nShutting down...")
         self.running = False
         self.node.running = False

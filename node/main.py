@@ -23,17 +23,26 @@ from cryptography.hazmat.primitives import hashes
 
 
 class RealSecurity:
-    """Real security module that verifies Sink signatures."""
+    """Módulo de segurança real que verifica assinaturas do Sink."""
     
     def __init__(self, sink_cert_path):
-        """Load Sink certificate for signature verification."""
+        """
+        Carrega o certificado do Sink para verificação de assinaturas.
+        
+        :param sink_cert_path: Caminho para o certificado do Sink.
+        """
         with open(sink_cert_path, 'rb') as f:
             self.sink_cert = x509.load_pem_x509_certificate(f.read(), default_backend())
         self.sink_public_key = self.sink_cert.public_key()
-        print(f"[Security] Sink certificate loaded: {sink_cert_path}")
     
     def verify_sink_signature(self, data, signature):
-        """Verify signature from Sink using its public key."""
+        """
+        Verifica a assinatura do Sink usando sua chave pública.
+        
+        :param data: Dados assinados.
+        :param signature: Assinatura a verificar.
+        :return: True se a assinatura for válida, False caso contrário.
+        """
         try:
             self.sink_public_key.verify(
                 signature,
@@ -42,22 +51,38 @@ class RealSecurity:
             )
             return True
         except Exception as e:
-            print(f"[!] Signature verification failed: {e}")
+            print(f"[!] Verificação de assinatura falhou: {e}")
             return False
 
     def update_sink_cert(self, new_cert):
-        """Update the trusted Sink certificate/public key."""
+        """
+        Atualiza o certificado do Sink confiável dinamicamente (ex: renovação).
+        
+        :param new_cert: Novo certificado X.509 do Sink.
+        """
         self.sink_cert = new_cert
         self.sink_public_key = new_cert.public_key()
-        print("[Security] Safe Sink Certificate updated dynamically.")
+        print("[Security] Certificado do Sink atualizado.")
 
 
 class RxCharacteristic(Characteristic):
+    """
+    Característica GATT de Recepção (Rx).
+    Responsável por receber dados de outros nós, detectar handshakes de segurança
+    e encaminhar pacotes para o Router.
+    """
+    
     def __init__(self, bus, index, service, router):
         super().__init__(bus, index, SIC_RX_CHAR_UUID, ['write', 'write-without-response'], service)
         self.router = router
 
     def WriteValue(self, value, options):
+        """
+        Callback chamado quando um dispositivo remoto escreve nesta característica.
+        
+        :param value: Valor escrito (bytes).
+        :param options: Opções de escrita (inclui caminho do dispositivo).
+        """
         data = bytes(value)
         mac = "unknown"
 
@@ -65,48 +90,33 @@ class RxCharacteristic(Characteristic):
         if device_path and "dev_" in device_path:
             mac = device_path.split("dev_")[1].replace("_", ":")
 
-        # DEBUG: Show first bytes to diagnose handshake detection issue
-        print(f"[RX-DEBUG] {len(data)} bytes from {mac}, first 10 bytes: {data[:10].hex()}")
-
-        # Check if this is handshake data (starts with 0xFF marker)
+        # Verifica se é dado de handshake (começa com marcador 0xFF)
         if len(data) >= 7 and data[0] == 0xFF:
             try:
                 total_length = int.from_bytes(data[1:5], 'big')
                 chunk_index = int.from_bytes(data[5:7], 'big')
                 chunk_data = data[7:]
                 
-                print(f"[RX-Handshake] Chunk {chunk_index} from {mac}")
-                
-                # If this is the first chunk from an unknown MAC, trigger incoming handshake FIRST
-                # This will register the transport so route_chunk will work
+                # Se for o primeiro chunk de um MAC desconhecido, aciona o handshake de entrada
                 if (chunk_index == 0 and 
                     mac not in self.router.link_keys and 
                     not handshake_receive_queue.has_transport(mac)):
-                    print(f"[RX-Handshake] First chunk from unknown peer {mac}, triggering handshake response")
                     self.router.handle_incoming_handshake(mac)
-                    # Give thread time to register transport
                     import time
                     time.sleep(0.1)
                 
-                # Now route the chunk (transport should be registered by now)
                 if handshake_receive_queue.route_chunk(mac, total_length, chunk_index, chunk_data):
                     return
                 else:
-                    print(f"[!] Warning: Could not route handshake chunk {chunk_index} from {mac}")
                     return
                     
-            except Exception as e:
-                print(f"[!] Error parsing handshake frame: {e}")
-                pass  # Not handshake data, process normally
-        
-        print(f"[RX] {len(data)} bytes de {mac}")
+            except Exception:
+                pass  # Processar como dado normal se falhar parse
 
         try:
-            # 1. Abrir o pacote para verificar o payload
             src, dest, msg_type, payload, seq, mac_sig = PacketHeader.unpack(data)
             packet_changed = False
 
-            # 2. Corrigir se o payload não for bytes (isto evita o erro "Key... must be bytes")
             if payload is None:
                 payload = b''
                 packet_changed = True
@@ -114,16 +124,20 @@ class RxCharacteristic(Characteristic):
                 payload = payload.encode('utf-8')
                 packet_changed = True
             
-            # 3. Se corrigimos, voltamos a fechar o pacote em bytes
             if packet_changed:
                 data = PacketHeader.pack(src, dest, msg_type, payload, seq, mac_sig)
         except Exception:
-            pass # Se o pacote estiver inválido, deixa o router lidar com ele
+            pass
             
         self.router.process_incoming_packet(data, mac)
 
 
 class NodeApplication(Application):
+    """
+    Camada de Aplicação BLE (GATT Server).
+    Define os serviços e características oferecidos pelo nó.
+    """
+    
     def __init__(self, bus, router):
         super().__init__(bus)
         service = Service(bus, 0, SIC_SERVICE_UUID, True)
@@ -135,9 +149,13 @@ class NodeApplication(Application):
         self.router = router
 
     def receive(self, src_nid, payload):
+        """
+        Callback para receber mensagens da camada de aplicação.
+        
+        :param src_nid: NID da origem.
+        :param payload: Conteúdo da mensagem.
+        """
         print(f"[App] Recebido de {src_nid.hex()}: {payload}")
-        # Store in router stats for UI (or Node)
-        # Assuming payload is text bytes
         try:
             msg_text = payload.decode('utf-8')
         except:
@@ -147,10 +165,23 @@ class NodeApplication(Application):
 
 
 class Node:
+    """
+    Classe principal que representa um Nó IoT.
+    Coordena o BLE Manager, Router, Segurança e CLI.
+    """
+    
     def __init__(self, nid, cert_path, key_path, ca_cert_path, sink_cert_path):
+        """
+        Inicializa o Nó.
+        
+        :param nid: Network ID do nó.
+        :param cert_path: Caminho do certificado.
+        :param key_path: Caminho da chave privada.
+        :param ca_cert_path: Caminho do certificado da CA.
+        :param sink_cert_path: Caminho do certificado do Sink.
+        """
         print(f"[*] Node iniciado: {nid.hex()}")
 
-        # Guardar o NID também no Node para a UI
         self.node_nid = nid  
 
         self.ble_manager = BLEManager(nid)
@@ -170,10 +201,9 @@ class Node:
         )
 
         self.app = NodeApplication(BUS, self.router)
-        self.router.app_layer = self.app # Link app layer
+        self.router.app_layer = self.app
         self.app.register()
 
-        # Initialize and register BLE Agent for pairing
         self.agent = BLEAgent(BUS)
         self.agent.register()
 
@@ -183,22 +213,32 @@ class Node:
         self.running = True
 
     def start_logic_loop(self):
+        """Inicia o loop lógico em uma thread separada."""
         t = threading.Thread(target=self._logic_loop, daemon=True)
         t.start()
 
     def _logic_loop(self):
+        """Loop principal de lógica de conexão (monitoramento)."""
         time.sleep(2)
         while self.running:
             self.ble_manager.monitor_connection_status()
-            # Manual mode: no automatic uplink search
             time.sleep(10)
     
     def scan_for_uplinks(self):
-        """Manually trigger BLE scan for nearby devices"""
-        print("[*] Manual scan triggered")
+        """
+        Aciona manualmente a varredura por uplinks.
+        
+        :return: Resultados da varredura.
+        """
         return self.ble_manager.scan_for_devices()
 
     def send_to_sink(self, text):
+        """
+        Envia uma mensagem de texto para o Sink.
+        
+        :param text: Texto a enviar.
+        :return: True se enviado (enfileirado), False caso contrário.
+        """
         if not self.router.sink_nid:
             print("[!] Sink NID desconhecido")
             return False
@@ -206,32 +246,28 @@ class Node:
         return self.router.send_app_data(self.router.sink_nid, text.encode('utf-8'))
 
     def force_connect(self, mac):
-        print(f"[*] Force Connect solicitado para {mac}")
+        """
+        Força uma conexão manual a um dispositivo específico.
         
-        # 1. Disconnect current Uplink if exists
+        :param mac: Endereço MAC do dispositivo.
+        :return: True se conectado, False caso contrário.
+        """
+        
         curr = self.ble_manager.uplink_addr
         if curr:
-             print(f"[*] A desconectar do uplink atual: {curr}")
              self.ble_manager.disconnect_from_device(curr)
         
-        # 2. Attempt Connection
         if self.ble_manager.connect_to_device(mac):
-             print(f"[*] Sucesso Conexão Forçada a {mac}")
              
-             # 3. Manually set as Uplink
-             # We might not know NID or Hop Count yet.
-             # Hop Count = 255 (Unknown/High)
              self.ble_manager.uplink_addr = mac
-             self.ble_manager.uplink_nid = b'\x00'*16 # Unknown
+             self.ble_manager.uplink_nid = b'\x00'*16 
              self.ble_manager.hop_count = 255
              self.ble_manager.update_advertisement()
              
-             # Notify Router
-             self.router.set_uplink(mac, 254) # results in local hop=255
+             self.router.set_uplink(mac, 254)
              
              return True
         else:
-             print(f"[!] Falha Conexão Forçada a {mac}")
              return False
 
 
@@ -247,7 +283,6 @@ def main():
     if not nid:
         sys.exit(1)
     
-    # Verify all certificate files exist
     for path in [args.cert, args.key, args.ca, args.sink_cert]:
         if not os.path.exists(path):
             print(f"[!] File not found: {path}")
@@ -259,7 +294,6 @@ def main():
     node = Node(nid, args.cert, args.key, args.ca, args.sink_cert)
     node.start_logic_loop()
 
-    # Start CLI interface
     cli = NodeCLI(node)
     
     try:

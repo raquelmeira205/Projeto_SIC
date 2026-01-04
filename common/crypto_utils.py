@@ -6,14 +6,14 @@ def generate_mac(key: bytes, data: bytes) -> bytes:
     Gera um HMAC-SHA256 para os dados fornecidos usando a chave.
     
     Args:
-        key (bytes): Chave secreta (ex: Session Key).
+        key (bytes): Chave secreta (ex: Chave de Sessão).
         data (bytes): Dados a autenticar.
         
     Returns:
-        bytes: MAC de 32 bytes.
+        bytes: MAC de 32 bytes de acordo com SHA-256.
     """
     if not isinstance(key, bytes) or not isinstance(data, bytes):
-        raise TypeError("Key e data devem ser bytes")
+        raise TypeError("Chave e dados devem ser do tipo bytes")
         
     h = hmac.new(key, data, hashlib.sha256)
     return h.digest()
@@ -21,6 +21,7 @@ def generate_mac(key: bytes, data: bytes) -> bytes:
 def verify_mac(key: bytes, data: bytes, received_mac: bytes) -> bool:
     """
     Verifica se o MAC recebido corresponde aos dados e chave.
+    Utiliza comparação de tempo constante para segurança.
     
     Args:
         key (bytes): Chave secreta.

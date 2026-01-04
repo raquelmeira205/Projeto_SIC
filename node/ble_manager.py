@@ -11,7 +11,17 @@ from common.bluez_classes import Advertisement
 
 
 class BLEManager:
+    """
+    Gerencia as operações de Bluetooth Low Energy (BLE) para o nó, incluindo publicidade,
+    conexões com outros dispositivos (uplink/downlink) e envio de pacotes GATT.
+    """
+
     def __init__(self, node_nid: bytes):
+        """
+        Inicializa o gerenciador BLE.
+
+        :param node_nid: ID do nó (Network ID) em bytes.
+        """
         self.node_nid = node_nid
 
         self.uplink_addr = None
@@ -25,30 +35,28 @@ class BLEManager:
         self.router_callback_connect = None
         self.router_callback_disconnect = None
         
-        # Multiple Sinks / Failover
-        self.uplink_candidates = [] # List of tuples: (mac, name, hop, rssi, nid)
+        self.uplink_candidates = []
         self.current_candidate_index = 0
 
-        # índice único DBus (evita colisões)
         self.adv_index = node_nid[-1]
 
-    # ------------------------------------------------------------------
-    # Callbacks Router
-    # ------------------------------------------------------------------
-
     def set_router_callbacks(self, on_connect, on_disconnect):
+        """
+        Define os callbacks para eventos de conexão e desconexão do roteador.
+
+        :param on_connect: Função a ser chamada quando uma conexão é estabelecida.
+        :param on_disconnect: Função a ser chamada quando uma conexão é perdida.
+        """
         self.router_callback_connect = on_connect
         self.router_callback_disconnect = on_disconnect
 
-    # ------------------------------------------------------------------
-    # Advertisement
-    # ------------------------------------------------------------------
-
     def start_advertising(self):
+        """
+        Inicia a publicidade BLE do nó.
+        O payload de publicidade inclui a contagem de saltos (hop count) e o NID do nó.
+        """
         if self.advertisement:
             return
-
-        print(f"[*] Advertising (Hop Count={self.hop_count})")
 
         self.advertisement = Advertisement(
             BUS,
@@ -56,20 +64,22 @@ class BLEManager:
             advertising_type="peripheral"
         )
 
-        # Hop count: -1 → 0xFF
         hc = self.hop_count if self.hop_count >= 0 else 0xFF
         payload = bytes([hc]) + self.node_nid
         
-        print(f"[DEBUG] Node advertising: ID=0xFFFE ({0xFFFE}), hop={hc}, payload={payload.hex()}")
         self.advertisement.add_manufacturer_data(0xFFFE, payload)
 
         try:
             self.advertisement.register(ADAPTER_PATH)
         except Exception as e:
-            print(f"[!] Advertisement falhou: {e}")
+            print(f"[!] Falha ao iniciar Advertisement: {e}")
             self.advertisement = None
 
     def update_advertisement(self):
+        """
+        Atualiza os dados de publicidade (por exemplo, quando o hop count muda).
+        Para e reinicia o advertisement com os novos dados.
+        """
         if self.advertisement:
             try:
                 self.advertisement.unregister(ADAPTER_PATH)
@@ -79,39 +89,36 @@ class BLEManager:
 
         self.start_advertising()
 
-    # ------------------------------------------------------------------
-    # GATT Send
-    # ------------------------------------------------------------------
-
     def send_packet(self, dest_mac, packet):
+        """
+        Envia um pacote de dados para um dispositivo de destino via GATT.
+        Tenta conectar se não estiver conectado e aguarda a descoberta de serviços.
+
+        :param dest_mac: Endereço MAC do destino.
+        :param packet: Dados do pacote a serem enviados.
+        :return: True se enviado com sucesso, False caso contrário.
+        """
         device = get_device_object(dest_mac)
 
         if not device or not device.Connected:
             if not self.connect_to_device(dest_mac):
                 return False
 
-        # Wait for services to be discovered
         try:
             if not device.ServicesResolved:
-                # Only print if we are actually going to wait
                 if not get_gatt_characteristic(dest_mac, SIC_RX_CHAR_UUID):
-                    print(f"[BLE] Waiting for service discovery on {dest_mac}...")
                     import time
-                    for i in range(20):  # Wait up to 2 seconds
+                    for i in range(20):
                         time.sleep(0.1)
                         if device.ServicesResolved or get_gatt_characteristic(dest_mac, SIC_RX_CHAR_UUID):
-                            # print(f"[BLE] Ready for {dest_mac}")
                             break
-                    else:
-                        print(f"[BLE] Warning: Services not resolved for {dest_mac}, attempting anyway...")
         except:
-            pass  # Property might not exist
+            pass
 
         char = get_gatt_characteristic(dest_mac, SIC_RX_CHAR_UUID)
         if not char:
             return False
 
-        # Retry logic for sending packets
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -120,39 +127,42 @@ class BLEManager:
             except Exception as e:
                 err_str = str(e)
                 if "InProgress" in err_str or "Busy" in err_str:
-                     # Transient error, wait and retry
-                     print(f"[BLE] Write busy (attempt {attempt+1}/{max_retries})... waiting")
                      import time
                      time.sleep(0.2)
                      continue
                 
-                print(f"[BLE] WriteValue failed on attempt {attempt+1}: {e}")
-                # If "NotConnected" or similar, maybe stop retrying?
                 if "NotConnected" in err_str:
                     break
         
         return False
 
     def write_value(self, mac, data):
-       
+        """
+        Wrapper para enviar dados para um endereço MAC específico.
+
+        :param mac: Endereço MAC do destino.
+        :param data: Dados a serem escritos.
+        :return: Resultado de send_packet.
+        """
         return self.send_packet(mac, data)
 
-    # ------------------------------------------------------------------
-    # Conexões
-    # ------------------------------------------------------------------
-
     def connect_to_device(self, mac):
+        """
+        Estabelece uma conexão BLE com um dispositivo específico.
+        Tenta usar o método ConnectDevice do BlueZ para conexões LE, com fallback para Connect padrão.
+
+        :param mac: Endereço MAC do dispositivo.
+        :return: True se conectado com sucesso, False caso contrário.
+        """
         import time
         from gi.repository import GLib
         
-        # Wait for device to appear in D-Bus (from scan)
         max_wait = 5
         device = None
         for i in range(max_wait):
             device = get_device_object(mac)
             if device:
                 break
-            print(f"[*] Aguardando dispositivo aparecer no D-Bus... ({i+1}/{max_wait})")
             time.sleep(1)
         
         if not device:
@@ -160,68 +170,41 @@ class BLEManager:
             return False
 
         try:
-            # Check if already connected
             if hasattr(device, 'Connected') and device.Connected:
-                print(f"[*] Já conectado a {mac}")
                 return True
             
-            print(f"[*] Conectando a {mac} via BLE...")
-            
-            # Try to connect using the adapter's ConnectDevice method for LE
             connection_initiated = False
             try:
-                # Access the correct D-Bus interface
                 adapter = BUS.get("org.bluez", ADAPTER_PATH)['org.bluez.Adapter1']
-                # Use ConnectDevice with address type for LE connections
                 properties = {
                     'Address': GLib.Variant('s', mac),
-                    'AddressType': GLib.Variant('s', 'public')  # Force LE public address
+                    'AddressType': GLib.Variant('s', 'public')
                 }
-                result = adapter.ConnectDevice(properties)
-                print(f"[*] ConnectDevice retornou: {result}")
+                adapter.ConnectDevice(properties)
                 connection_initiated = True
-            except Exception as e:
-                print(f"[!] ConnectDevice falhou: {e}")
-                # Fallback to direct Connect
+            except Exception:
                 try:
                     device.Connect()
                     connection_initiated = True
                 except Exception as e2:
-                    # Check if error is "already in progress" which means connection is happening
                     if 'InProgress' in str(e2) or 'busy' in str(e2).lower():
-                        print(f"[*] Conexão já em progresso")
                         connection_initiated = True
                     else:
-                        print(f"[!] Connect também falhou: {e2}")
+                        print(f"[!] Connect falhou: {e2}")
             
             if not connection_initiated:
                 return False
             
-            # Wait for connection to establish
-            print(f"[*] Aguardando conexão estabelecer...")
-            for i in range(15):  # Increased timeout
+            for i in range(15):
                 time.sleep(0.5)
-                device = get_device_object(mac)  # Refresh device object
+                device = get_device_object(mac)
                 if device and hasattr(device, 'Connected') and device.Connected:
-                    print(f"[*] ✓ Conexão estabelecida com {mac}")
-                    
-                    # Re-advertise to remain discoverable for other nodes
-                    # This is critical for multi-hop topology
-                    print(f"[*] Re-advertising to remain discoverable...")
                     self.update_advertisement()
-                    
                     return True
             
-            print(f"[!] Timeout aguardando conexão, mas pode estar conectado")
-            # Check one last time
             device = get_device_object(mac)
             if device and hasattr(device, 'Connected') and device.Connected:
-                print(f"[*] ✓ Conexão confirmada!")
-                
-                # Re-advertise to remain discoverable for other nodes
-                print(f"[*] Re-advertising to remain discoverable...")
                 self.update_advertisement()
-                
                 return True
             
             return False
@@ -230,8 +213,13 @@ class BLEManager:
             print(f"[!] Erro conexão {mac}: {e}")
             return False
 
-
     def disconnect_from_device(self, mac):
+        """
+        Desconecta de um dispositivo BLE.
+
+        :param mac: Endereço MAC do dispositivo.
+        :return: True se desconectado com sucesso (ou tentativa feita), False caso contrário.
+        """
         device = get_device_object(mac)
         if not device:
             return False
@@ -249,26 +237,25 @@ class BLEManager:
         except Exception:
             return False
 
-    # ------------------------------------------------------------------
-    # Uplink logic
-    # ------------------------------------------------------------------
-
     def scan_for_devices(self):
-        """Manual scan for nearby devices without connecting - using simplepyble"""
-        print("\n--- Manual scan for devices (using simplepyble) ---")
-        
+        """
+        Realiza uma varredura manual por dispositivos BLE próximos.
+        Usa simplepyble se disponível, ou fallback para scan D-Bus padrão.
+        Filtra apenas dispositivos válidos do projeto (SIC).
+
+        :return: Lista de dicionários contendo informações dos dispositivos encontrados.
+        """
         try:
             from node.ble_discovery import BLEDiscovery
             import time
             
             scanner = BLEDiscovery('hci0')
-            devices = scanner.scan(duration_ms=10000)  # 10 second scan
+            devices = scanner.scan(duration_ms=10000)
             
-            # Convert to expected format
             result = []
             for dev in devices:
                 hop = dev.get('hop_count', -1)
-                if hop >= 0:  # Only include valid SIC devices
+                if hop >= 0:
                     result.append({
                         'mac': dev['mac'],
                         'name': dev.get('name', 'Unknown'),
@@ -276,28 +263,21 @@ class BLEManager:
                         'rssi': dev.get('rssi', 0),
                         'nid': dev.get('nid')
                     })
-                    print(f"  Found: {dev['mac']} | Hop:{hop} | RSSI:{dev.get('rssi', 0)}")
             
-            # IMPORTANT: Also do a short D-Bus scan to register devices in BlueZ
-            # This is needed for subsequent D-Bus Connect() calls to work
             if result:
-                print("[*] Registering devices in BlueZ D-Bus...")
                 try:
                     adapter = BUS.get("org.bluez", ADAPTER_PATH)
                     adapter.StartDiscovery()
-                    time.sleep(2)  # Short discovery to register devices
+                    time.sleep(2)
                     adapter.StopDiscovery()
                 except Exception as e:
-                    print(f"[!] D-Bus registration warning: {e}")
+                    print(f"[!] Aviso registro D-Bus: {e}")
             
-            print(f"[*] Found {len(result)} SIC devices")
             return result
             
         except Exception as e:
-            print(f"[!] SimplePyBLE scan error: {e}")
-            print("[!] Falling back to D-Bus scan...")
+            print(f"[!] Erro SimplePyBLE, usando fallback: {e}")
             
-            # Fallback to D-Bus scan
             devices = scan_nearby_devices(duration=10)
             
             result = []
@@ -311,37 +291,35 @@ class BLEManager:
                         'nid': nid
                     })
             
-            print(f"[*] Found {len(result)} devices")
             return result
 
     def find_and_connect_uplink(self):
-        print("\n--- Procurando uplink ---")
+        """
+        Procura por um uplink adequado entre os dispositivos próximos e tenta conectar.
+        Prioriza dispositivos com menor hop count e melhor sinal (RSSI).
 
+        :return: True se conectar a um uplink, False caso contrário.
+        """
         devices = scan_nearby_devices(duration=10)
         candidates = [d for d in devices if d[2] >= 0]
 
         if not candidates:
-            print("[!] Nenhum uplink encontrado")
             return False
 
-        # Sort: lowest hop first (d[2]), then highest RSSI (-d[3])
-        # candidates item: (mac, name, hop, rssi, nid)
         self.uplink_candidates = sorted(candidates, key=lambda d: (d[2], -d[3]))
         
-        print(f"[*] Found {len(self.uplink_candidates)} candidates.")
-        for i, c in enumerate(self.uplink_candidates):
-            print(f"  [{i}] {c[1]} ({c[0]}) Hop={c[2]} RSSI={c[3]}")
-
         self.current_candidate_index = 0
         return self._try_connect_next_candidate()
 
     def _try_connect_next_candidate(self):
-        """Helper to try connecting to the next available candidate."""
+        """
+        Método auxiliar para tentar conectar ao próximo candidato da lista de uplinks.
+        
+        :return: True se conectado com sucesso, False se todos falharem.
+        """
         while self.current_candidate_index < len(self.uplink_candidates):
             cand = self.uplink_candidates[self.current_candidate_index]
             mac, name, hop, rssi, nid = cand
-            
-            print(f"[*] Tentando candidato {self.current_candidate_index + 1}/{len(self.uplink_candidates)}: {name} {mac} (hop={hop})")
             
             if self.connect_to_device(mac):
                 self.uplink_addr = mac
@@ -354,48 +332,47 @@ class BLEManager:
                 
                 return True
             else:
-                print(f"[!] Falha ao conectar a {mac}. Tentando próximo...")
                 self.current_candidate_index += 1
                 
-        print("[!] Todos os candidatos falharam.")
         self.uplink_candidates = []
         return False
     
     def failover_uplink(self):
-        """Attempt to switch to the next best uplink without full rescan."""
-        print("[*] Iniciando Failover de Uplink...")
-        
-        # Advance index to skip the one that just failed/disconnected
+        """
+        Tenta alternar para o próximo melhor uplink sem realizar uma nova varredura completa.
+        Utilizado quando o uplink atual falha.
+
+        :return: True se o failover for bem-sucedido, False caso contrário.
+        """
         self.current_candidate_index += 1
         
         if self._try_connect_next_candidate():
-            print("[*] Failover bem sucedido!")
             return True
             
-        print("[!] Failover falhou. Necessário novo scan.")
         return False
 
-    # ------------------------------------------------------------------
-    # Chain disconnection
-    # ------------------------------------------------------------------
-
     def trigger_chain_disconnection(self):
-        # Attempt failover first
+        """
+        Trata a desconexão do uplink.
+        Tenta realizar failover para outro candidato. Se falhar, reseta o estado de uplink e hop count.
+        """
         if self.uplink_candidates and self.current_candidate_index < len(self.uplink_candidates) - 1:
-             print("[!] Perda de uplink detectada. Tentando failover...")
              if self.failover_uplink():
                  return
                  
-        print("[!!!] Perda de uplink (Nível BLE) - Sem candidatos de failover")
+        print("[!] Perda de uplink confirmada - Sem failover possível")
 
         self.uplink_addr = None
         self.uplink_nid = None
         self.hop_count = -1
 
-
         self.update_advertisement()
 
     def monitor_connection_status(self):
+        """
+        Monitora periodicamente o status da conexão com o uplink.
+        Aciona a lógica de desconexão se o uplink não estiver mais conectado.
+        """
         if not self.uplink_addr:
             return
 
@@ -404,5 +381,4 @@ class BLEManager:
             if not device or not device.Connected:
                 self.trigger_chain_disconnection()
         except Exception:
-             # Se der erro a aceder ao objeto, assumimos que desconectou
              self.trigger_chain_disconnection()

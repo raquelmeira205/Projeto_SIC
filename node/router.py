@@ -1,29 +1,39 @@
 import time
 import threading
+import json
 from common.packet_structs import PacketHeader, MsgType, HeartbeatPayload
 from common.crypto_utils import generate_mac, verify_mac
 from common.security_handshake import SecurityHandshake
 from common.ble_handshake_transport import BLEHandshakeTransport, handshake_receive_queue
 from common.crl_manager import CRLManager
 from common.pki_utils import extract_nid_from_cert
+from node.dtls_client import DtlsSession
+from common.dtls_structs import ContentType
 
 HEARTBEAT_INTERVAL = 5.0
 MAX_MISSED = 3
 TIMEOUT_LIMIT = HEARTBEAT_INTERVAL * MAX_MISSED
 
+
 class Router:
+    """
+    Controlador central de rede do nó.
+    Gerencia a tabela de roteamento, o envio/recebimento de pacotes,
+    a segurança de link (MAC/Replay Protection), o tratamento de Heartbeats,
+    e a sessão DTLS fim-a-fim.
+    """
+
     def __init__(self, my_nid, security_module, ble_manager, app_layer=None, cert_path=None, key_path=None, ca_cert_path=None):
         self.my_nid = my_nid
         self.security = security_module
         self.ble = ble_manager
         self.app_layer = app_layer
         
-        # Certificate paths for handshake
         self.cert_path = cert_path
         self.key_path = key_path
         self.ca_cert_path = ca_cert_path
 
-        self.crl_manager = CRLManager("crl_node.json") # Nodes might have their own local copy
+        self.crl_manager = CRLManager("crl_node.json")
 
         self.forwarding_table = {}
         self.uplink_connection = None
@@ -31,98 +41,77 @@ class Router:
 
         self.blocked_downlinks = set()
         
-        # Link Layer Security State
-        # Map: connection_handle -> session_key (bytes)
         self.link_keys = {} 
-        # Map: connection_handle -> last_valid_sequence_number (int)
         self.replay_counters = {}
-        # Map: connection_handle -> my_outgoing_sequence_number (int)
         self.my_counters = {}
-        # Track MACs with incoming handshakes in progress to avoid duplicate handshake attempts
         self.pending_incoming_handshakes = set()
 
         self.last_heartbeat_time = 0
         self.last_heartbeat_seq = -1
         self.hops_to_sink = -1
 
-        # Downlink Monitoring Config
-        self.downlink_missed_heartbeats = {} # connection -> missed_count
-
+        self.downlink_missed_heartbeats = {}
 
         self._stop_monitor = False
         
-        # Stats & UI Support
         self.sink_nid = None
         self.stats = {
             "lost_heartbeats": 0,
             "routed_messages": 0,
-            "received_messages": [] # List of (sender_nid, msg_bytes)
+            "received_messages": []
         }
         
-
-        
-        # DTLS Session
         self.dtls_session = None
-        # Queue for packets waiting for DTLS handshake: list of (dest_nid, payload)
         self.pending_dtls_packets = []
 
         threading.Thread(target=self._monitor_heartbeat_timeout, daemon=True).start()
 
     def set_uplink(self, connection_handle, parent_hops):
+        """
+        Define um novo uplink e inicia o handshake de segurança.
+        
+        :param connection_handle: Endereço MAC ou identificador da conexão.
+        :param parent_hops: Contagem de hops do pai.
+        """
         self.uplink_connection = connection_handle
         
-        # Lógica de Hop Count Corrigida
-        # Se o pai for 255 (Unknown/-1) ou 0xFF, nós ficamos indefinidos também
         if parent_hops == 255 or parent_hops == -1:
             self.hops_to_sink = -1
             ble_hop_val = 255
         else:
-            # Incrementa corretamente
             self.hops_to_sink = parent_hops + 1
             ble_hop_val = self.hops_to_sink
 
-        # Atualiza o BLE Manager para a Publicidade (Advertisement) estar correta
         self.ble.hop_count = ble_hop_val
         self.ble.update_advertisement()
 
         self.last_heartbeat_time = time.time()
-        print(f"[Router] Conectado a {connection_handle}. Hop Count: {self.hops_to_sink}")
-
-        # pausa para o BlueZ negociar MTU e intervalos
+        
         time.sleep(2.0)
 
-        # Init security state for uplink if not exists
         if connection_handle not in self.link_keys:
-             # Perform handshake to establish session key
              try:
                  session_key, peer_cert = self.perform_handshake(connection_handle, is_initiator=True)
                  self.link_keys[connection_handle] = session_key
                  self.my_counters[connection_handle] = 0
                  self.replay_counters[connection_handle] = 0
                  
-                 # Multiple Sinks: If we connected directly to a Sink (hops=0), update trusted cert
                  if parent_hops == 0 and peer_cert:
-                     print(f"[Router] Connected directly to Sink {connection_handle}. Updating Trusted Cert.")
                      self.security.update_sink_cert(peer_cert)
                      
-                 print(f"[Router] Handshake com uplink {connection_handle} concluído")
-             except Exception as e:
-                 print(f"[!] Handshake falhou com {connection_handle}: {e}")
-                 # Disconnect on handshake failure
+             except Exception:
                  self.ble.disconnect_from_device(connection_handle)
                  raise
 
-    
     def send_data_packet(self, dest_nid, payload, msg_type=MsgType.DATA):
-        """Helper to send raw data packet (used by DTLS client for handshake records)"""
+        """Wrapper para enviar pacote de dados bruto."""
         self._route_data(self.my_nid, dest_nid, payload, msg_type)
 
     def establish_dtls_session(self):
+        """Inicia a sessão DTLS com o Sink."""
         if not self.sink_nid:
-             print("[Router] Sink unknown, cannot start DTLS")
              return
              
-        from node.dtls_client import DtlsSession
         self.dtls_session = DtlsSession(
             self.sink_nid, self.my_nid, 
             self.cert_path, self.key_path, self.ca_cert_path, 
@@ -131,215 +120,148 @@ class Router:
         self.dtls_session.perform_handshake()
 
     def send_app_data(self, dest_nid, payload):
-        """Send application data (End-to-End Encrypted if to Sink)"""
-        
+        """
+        Envia dados da aplicação, usando criptografia fim-a-fim se o destino for o Sink.
+        """
         if dest_nid == self.sink_nid:
             if not self.dtls_session:
                 self.establish_dtls_session()
-                # Handshake is async-ish (needs RTT). We probably can't send payload yet.
-                print("[Router] DTLS Handshake initiated... Queueing packet.")
                 self.pending_dtls_packets.append((dest_nid, payload))
                 return True
                 
-            if self.dtls_session.state.value != 4: # ESTABLISHED
-                print("[Router] DTLS Handshake in progress... Queueing packet.")
+            if self.dtls_session.state.value != 4:
                 self.pending_dtls_packets.append((dest_nid, payload))
                 return True
                 
-            # Encrypt
             try:
                 record = self.dtls_session.send(payload)
                 self._route_data(self.my_nid, dest_nid, record, MsgType.DATA)
                 return True
-            except Exception as e:
-                print(f"[Router] Encrypt error: {e}")
+            except Exception:
                 return False
         else:
-            # Direct/Plain
             self._route_data(self.my_nid, dest_nid, payload)
         
         return True
 
     def process_incoming_packet(self, packet_data, incoming_conn):
+        """
+        Processa pacotes recebidos (validação de segurança, roteamento, heartbeats).
+        """
         try:
-             # 1. Unpack
             src, dest, mtype, payload, seq, mac = PacketHeader.unpack(packet_data)
 
-            # 2. Security Checks (skip MAC verification for HEARTBEAT - uses signature instead)
             if mtype != MsgType.HEARTBEAT:
-                
                 if incoming_conn not in self.link_keys:
-                    print(f"[Router] Ignorando pacote seguro de {incoming_conn}... (Sem chave de sessão)")
-                    # Debug: print keys available
-                    # print(f"  Available keys: {list(self.link_keys.keys())}")
                     return
 
-                # --- CORREÇÃO: Extrair chave do tuplo se necessário ---
                 raw_key = self.link_keys[incoming_conn]
-                
-                # 1. Se for Tuplo, extrair o primeiro elemento
                 if isinstance(raw_key, tuple):
-                    # print(f"[Router-Fix] A corrigir chave em tuplo para {incoming_conn}")
                     key = raw_key[0]
                 else:
                     key = raw_key
                 
-                # 2. Garantir que é bytes
                 if not isinstance(key, bytes):
-                    print(f"[Router-Erro] Chave inválida (Tipo: {type(key)}).")
                     return
-                # --------------------------------------------------------
 
-                # Agora passamos a 'key' limpa para a verificação
                 if not self._verify_security(incoming_conn, packet_data, seq, mac, session_key=key):
-                    print(f"[!] Falha de segurança no pacote de {incoming_conn}")
                     return
 
             if incoming_conn and src != self.my_nid:
                 if self.forwarding_table.get(src) != incoming_conn:
                     self.forwarding_table[src] = incoming_conn
-                    # Initialize key placeholder if new connection found via forwarding? 
-                    # Ideally handshake happens first.
 
             if mtype == MsgType.HEARTBEAT:
                 self._handle_heartbeat(payload, incoming_conn, src)
             
             elif mtype == MsgType.DTLS_HANDSHAKE:
-                # Check if this DTLS packet is for us or needs routing
                 if dest == self.my_nid:
-                    # DTLS packet destined for this node - process locally
                     if self.dtls_session:
                         prev_state = self.dtls_session.state.value
                         self.dtls_session.handle_handshake_message(payload)
                         new_state = self.dtls_session.state.value
                         
-                        # check for transition to ESTABLISHED (4)
                         if prev_state != 4 and new_state == 4:
-                            print(f"[Router] DTLS Session Established! Flushing {len(self.pending_dtls_packets)} pending packets.")
                             while self.pending_dtls_packets:
                                 p_dest, p_payload = self.pending_dtls_packets.pop(0)
                                 self.send_app_data(p_dest, p_payload)
                 else:
-                    # DTLS packet for another node - route transparently
-                    # Intermediate node cannot see DTLS content (end-to-end encryption)
-                    print(f"[Router] Routing DTLS packet: {src.hex()[:8]}... -> {dest.hex()[:8]}...")
                     self._route_data(src, dest, payload, MsgType.DTLS_HANDSHAKE)
             
             elif mtype == MsgType.DATA:
-                # Check if this is DTLS-encrypted data for us
                 if dest == self.my_nid and src == self.sink_nid and self.dtls_session:
-                    # DATA packet from Sink destined for us - try DTLS decrypt
                     try:
-                        from common.dtls_structs import ContentType
                         ctype, plaintext = self.dtls_session.recv(payload)
                         if ctype == ContentType.APPLICATION_DATA:
                              if self.app_layer: self.app_layer.receive(src, plaintext)
                         elif ctype == ContentType.HANDSHAKE:
                              self.dtls_session.handle_handshake_message(payload)
-                    except Exception as e:
-                        print(f"[Router] Decrypt/Process error: {e}")
+                    except Exception:
+                        pass
                 else:
-                    # Regular routing (either not for us, or not DTLS-encrypted)
                     self._route_data(src, dest, payload)            
 
             elif mtype == MsgType.CONTROL:
-                # Handle Control Messages (e.g. CRL Updates)
                 try:
-                    import json
                     data = json.loads(payload.decode('utf-8'))
                     if data.get("type") == "crl":
                         revoked = data.get("revoked", [])
                         if self.crl_manager:
-                            print(f"[Router] Received CRL Update with {len(revoked)} entries")
                             if self.crl_manager.update_from_list(revoked):
-                                # If any change, propagate to downlinks
-                                print("[Router] Forwarding CRL update to downlinks...")
                                 for child in self.downlink_connections:
-                                    # Forward original payload
                                     self._send_authenticated_packet(child, src, b'\xFF'*16, MsgType.CONTROL, payload)
-                except Exception as e:
-                    print(f"[Router] Error processing CONTROL message: {e}")
+                except Exception:
+                    pass
 
         except Exception as e:
-            print(f"Packet Error: {e}")
+            print(f"[Packet Error] {e}")
 
     def _verify_security(self, conn, packet_data, seq, received_mac, session_key=None):
-        """
-        Verifica a integridade do pacote.
-        Agora aceita session_key opcional para não ter de buscar ao dict novamente.
-        """
-        # Se for loopback/processamento local, assumir seguro ou tratar diferente
+        """Verifica a integridade (MAC) e replay protection do pacote."""
         if conn is None: 
             return True
         
-        src_nid = packet_data[0:16]  # Assumindo estrutura do header
+        src_nid = packet_data[0:16]
         
-        # Se a chave não foi passada limpa, tenta buscar (mas cuidado com o tuplo)
         if session_key is None:
             if conn in self.link_keys:
                 session_key = self.link_keys[conn]
                 if isinstance(session_key, tuple):
-                    session_key = session_key[0]  # Extrair do tuplo aqui também
+                    session_key = session_key[0]
             else:
-                print(f"[!] Sem chave de sessão para {conn}... - handshake não realizado")
                 return False
         
         key = session_key
         
-        # 2. Reconstruct Header with Zero MAC for verification
-        # Necessitamos de reconstruir o cabeçalho exato usado para gerar o MAC
-        # O PacketHeader.pack coloca os bytes na ordem certa.
-        # unpack já separou os dados.
-        # Recriamos o pacote com MAC zerado:
         src, dest, mtype, payload, _, _ = PacketHeader.unpack(packet_data)
-        
-        # Recriar pacote SOMENTE para verificar MAC (seq_num faz parte do input)
         check_packet = PacketHeader.pack(src, dest, mtype, payload, seq, b'\x00'*32)
         
         if not verify_mac(key, check_packet, received_mac):
-            print(f"[sec] MAC Inválido de {conn}")
             return False
 
-        # 3. Replay Protection
         last_seq = self.replay_counters.get(conn, 0)
         if seq <= last_seq:
-            print(f"[sec] Replay detetado de {conn} (Seq {seq} <= {last_seq})")
             return False
             
         self.replay_counters[conn] = seq
         return True
 
     def _handle_heartbeat(self, payload, incoming_conn, src_nid):
-        # If we have an uplink, only accept heartbeats from it
-        # If we don't have an uplink but receive a valid heartbeat from a connection
-        # with an established session key, automatically set it as uplink
+        """Processa heartbeats recebidos, gerencia failover e retransmit para filhos."""
         if self.uplink_connection and incoming_conn != self.uplink_connection:
             return
         
-        # If no uplink but we have a session key with this connection, set it as uplink
         if not self.uplink_connection and incoming_conn in self.link_keys:
-            print(f"[Router] Auto-setting {incoming_conn} as uplink (received heartbeat)")
             self.uplink_connection = incoming_conn
             self.last_heartbeat_time = time.time()
-            # Also update BLE manager's uplink tracking
             self.ble.uplink_addr = incoming_conn
             self.ble.uplink_nid = src_nid
-            
-            # --- CORREÇÃO: REMOVER ESTAS LINHAS ---
-            # self.ble.hop_count = 1   <-- APAGAR ISTO (Isto forçava Hop 1 erradamente)
-            # self.hops_to_sink = 1    <-- APAGAR ISTO
-            # --------------------------------------
-            
             self.ble.update_advertisement()
 
-        # Capturar Sink NID e detetar Mudança de Sink
         if self.sink_nid != src_nid:
              if self.sink_nid is not None:
-                 print(f"[Router] Sink Changed! {self.sink_nid.hex()[:8]} -> {src_nid.hex()[:8]}")
-                 print("[Router] Resetting End-to-End DTLS Session due to Sink Change.")
-                 self.dtls_session = None # Reset session
-                 self.pending_dtls_packets = [] # Warning: Dropping pending packets for old sinK
-                 
+                 self.dtls_session = None
+                 self.pending_dtls_packets = []
              self.sink_nid = src_nid
 
         seq, sig = HeartbeatPayload.unpack(payload)
@@ -353,37 +275,25 @@ class Router:
         self.last_heartbeat_seq = seq
         self.last_heartbeat_time = time.time()
 
-        # Re-encapsulate heartbeat for downlinks
-        # Forward heartbeat from Sink to all downlink nodes
-        # Use actual Sink NID as source (not zeros)
         failed_downlinks = []
-        for child in list(self.downlink_connections): # Copy list to modify safe
+        for child in list(self.downlink_connections):
             if child in self.blocked_downlinks:
-                print(f"[Network Control] Simulating send failure to {child} (BLOCKED)")
                 failed_downlinks.append(child)
                 continue
                 
-            # Send heartbeat with correct Sink NID as source
-            # Destination should be broadcast (all zeros) or the child's NID
             if not self._send_authenticated_packet(child, src_nid, b'\x00'*16, MsgType.HEARTBEAT, payload):
-                print(f"[Router] Falha ao enviar heartbeat para {child}")
                 failed_downlinks.append(child)
-            else:
-                # Reset missed count if successful (optional, as we don't count success here, only failures are critical)
-                pass
 
-        # Handle failed downlinks immediately
         for child in failed_downlinks:
             count = self.downlink_missed_heartbeats.get(child, 0) + 1
             self.downlink_missed_heartbeats[child] = count
-            print(f"[Router] Downlink {child} missed heartbeat ({count}/{MAX_MISSED})")
             
             if count >= MAX_MISSED:
-                print(f"[Router] Downlink {child} DEAD. Disconnecting...")
                 self.ble.disconnect_from_device(child)
                 self.handle_disconnection(child)
 
     def _monitor_heartbeat_timeout(self):
+        """Monitora timeout do heartbeat do uplink."""
         while not self._stop_monitor:
             time.sleep(1)
             if self.uplink_connection:
@@ -392,6 +302,7 @@ class Router:
                     self.ble.disconnect_from_device(self.uplink_connection) 
 
     def handle_disconnection(self, conn):
+        """Trata a desconexão de um dispositivo (uplink ou downlink)."""
         to_del = [n for n, c in self.forwarding_table.items() if c == conn]
         for n in to_del: del self.forwarding_table[n]
         
@@ -401,14 +312,10 @@ class Router:
             del self.downlink_missed_heartbeats[conn]
 
         if conn == self.uplink_connection:
-            print("[Router] Uplink perdido. Resetting Hop Count.")
             self.uplink_connection = None
-            
-            # Reset Hop Count para -1 (Desligado)
             self.hops_to_sink = -1
-            self.ble.hop_count = 255 # 255 significa "Unknown/Infinity" no BLE
+            self.ble.hop_count = 255
             self.ble.update_advertisement()
-            
             self.hops_to_sink = -1
             self.forwarding_table.clear()
 
@@ -417,6 +324,7 @@ class Router:
             self.downlink_connections.clear()
 
     def _route_data(self, src, dest, payload, msg_type=MsgType.DATA):
+        """Roteia o pacote para o próximo salto adequado."""
         target_conn = None
         
         if dest == self.my_nid:
@@ -429,49 +337,35 @@ class Router:
 
         if target_conn:
             self.stats["routed_messages"] += 1
-            if self._send_authenticated_packet(target_conn, src, dest, msg_type, payload):
-                pass
-            else:
-                print(f"[!] Falha ao enviar para {target_conn}")
+            self._send_authenticated_packet(target_conn, src, dest, msg_type, payload)
 
     def _send_authenticated_packet(self, conn, src, dest, msg_type, payload):
+        """Cálcula o MAC, empacota e envia o pacote de forma segura."""
         if conn not in self.link_keys:
-             print(f"[!] Sem chave de sessão para {conn} - não é possível enviar")
              return False
              
         raw_key = self.link_keys[conn]
         
-        # --- CORREÇÃO: Extrair chave do tuplo se necessário ---
-        # 1. Se for Tuplo, extrair o primeiro elemento
         if isinstance(raw_key, tuple):
             key = raw_key[0]
         else:
             key = raw_key
-        # --------------------------------------------------------
         
-        # --- Type validation and conversion ---
-        # Ensure key is bytes
         if not isinstance(key, bytes):
-            print(f"[Router-Error] Session key for {conn} is not bytes! Type: {type(key)}")
             return False
         
-        # Ensure src is bytes (16-byte NID)
         if not isinstance(src, bytes):
             if isinstance(src, str):
                 src = src.encode('utf-8')[:16].ljust(16, b'\x00')
             else:
-                print(f"[Router-Error] src NID is not bytes! Type: {type(src)}")
                 return False
         
-        # Ensure dest is bytes (16-byte NID)
         if not isinstance(dest, bytes):
             if isinstance(dest, str):
                 dest = dest.encode('utf-8')[:16].ljust(16, b'\x00')
             else:
-                print(f"[Router-Error] dest NID is not bytes! Type: {type(dest)}")
                 return False
         
-        # Ensure payload is bytes
         if payload is None:
             payload = b''
         elif isinstance(payload, str):
@@ -480,70 +374,40 @@ class Router:
             try:
                 payload = bytes(payload)
             except:
-                print(f"[Router-Error] payload is not convertible to bytes! Type: {type(payload)}")
                 return False
         
         self.my_counters[conn] += 1
         seq = self.my_counters[conn]
         
-        # 1. Pack with Zero MAC
         try:
             temp_packet = PacketHeader.pack(src, dest, msg_type, payload, seq, b'\x00'*32)
-        except Exception as e:
-            print(f"[Router-Error] PacketHeader.pack failed: {e}")
-            print(f"  src type: {type(src)}, dest type: {type(dest)}, payload type: {type(payload)}")
-            return False
-        
-        # 2. Calculate MAC
-        try:
             mac = generate_mac(key, temp_packet)
-        except Exception as e:
-            print(f"[Router-Error] generate_mac failed: {e}")
-            print(f"  key type: {type(key)}, temp_packet type: {type(temp_packet)}")
+            final_packet = PacketHeader.pack(src, dest, msg_type, payload, seq, mac)
+            return self.ble.send_packet(conn, final_packet)
+        except Exception:
             return False
-        
-        # 3. Final Pack
-        final_packet = PacketHeader.pack(src, dest, msg_type, payload, seq, mac)
-        
-        return self.ble.send_packet(conn, final_packet)
     
     def perform_handshake(self, connection_mac, is_initiator=True):
         """
-        Perform security handshake with a peer device.
+        Realiza o handshake de segurança com um par.
         
-        Args:
-            connection_mac: MAC address of the peer
-            is_initiator: True if we initiate the handshake
-            
-        Returns:
-            tuple: (session_key, peer_cert)
-            
-        Raises:
-            Exception if handshake fails
+        :param connection_mac: Endereço MAC do par.
+        :param is_initiator: Se somos o iniciador.
+        :return: Tupla (session_key, peer_cert).
         """
         if not all([self.cert_path, self.key_path, self.ca_cert_path]):
-            raise RuntimeError("Certificate paths not configured for handshake")
+            raise RuntimeError("Caminhos de certificado não configurados")
         
-        print(f"[Handshake] Iniciando handshake com {connection_mac} (initiator={is_initiator})")
-        
-        # Create transport with BLE manager
         transport = BLEHandshakeTransport(connection_mac, self.ble, is_initiator=is_initiator)
         handshake_receive_queue.register_transport(connection_mac, transport)
         
         try:
-            # Create handshake instance
             handshake = SecurityHandshake(self.cert_path, self.key_path, self.ca_cert_path, self.crl_manager)
-            
-            # Perform handshake
             handshake.perform_handshake(transport)
-            
-            # Get session key
             session_key = handshake.session_key
             
             if not session_key or len(session_key) != 32:
-                raise RuntimeError("Invalid session key derived")
-            
-            print(f"[Handshake] Concluído com {connection_mac}: {session_key[:8].hex()}...")
+                raise RuntimeError("Chave de sessão inválida derivada")
             
             return session_key, handshake.peer_cert
             
@@ -552,76 +416,62 @@ class Router:
     
     def handle_incoming_handshake(self, peer_mac):
         """
-        Respond to an incoming handshake request from a peer node.
-        Called when we detect handshake chunks from a MAC we don't have a session key for.
+        Lida com uma solicitação de handshake recebida (responder).
         
-        This runs the handshake as the responder (server role).
-        
-        Args:
-            peer_mac: MAC address of the peer initiating the handshake
+        :param peer_mac: MAC do solicitante.
         """
-        # Skip if we already have a session key for this peer
         if peer_mac in self.link_keys:
             return
         
-        # Skip if handshake already in progress
         if peer_mac in self.pending_incoming_handshakes:
             return
         
-        # Mark as in progress
         self.pending_incoming_handshakes.add(peer_mac)
         
         def _run_handshake():
             try:
-                print(f"[Handshake] Responding to incoming handshake from {peer_mac}")
                 session_key, peer_cert = self.perform_handshake(peer_mac, is_initiator=False)
                 
-                # Store the session key and initialize security state
                 self.link_keys[peer_mac] = session_key
                 self.my_counters[peer_mac] = 0
                 self.replay_counters[peer_mac] = 0
                 
-                # Add to downlink connections
                 self.downlink_connections.add(peer_mac)
                 self.downlink_missed_heartbeats[peer_mac] = 0
                 
-                # Extract peer NID from cert to update forwarding table
                 if peer_cert:
                     try:
                         peer_nid = extract_nid_from_cert(peer_cert)
                         if peer_nid:
                              self._update_forwarding_table(peer_nid, peer_mac)
-                    except Exception as e:
-                        print(f"[Router] Failed to extract NID from peer cert: {e}")
+                    except Exception:
+                        pass
 
-                print(f"[Handshake] Incoming handshake from {peer_mac} completed successfully")
-                
-            except Exception as e:
-                print(f"[!] Incoming handshake from {peer_mac} failed: {e}")
+            except Exception:
+                pass
             finally:
-                # Remove from pending set
                 self.pending_incoming_handshakes.discard(peer_mac)
         
-        # Run handshake in background thread to avoid blocking
         threading.Thread(target=_run_handshake, daemon=True).start()
 
     def _update_forwarding_table(self, nid_bytes, mac_addr):
         self.forwarding_table[nid_bytes] = mac_addr
-        print(f"[Router] Forwarding Table Updated: {nid_bytes.hex()[:8]}... -> {mac_addr}")
 
     def toggle_heartbeat_block(self, child_conn):
-        """Ativa/Desativa o envio de heartbeats para um filho específico."""
+        """
+        Ativa/Desativa o bloqueio de heartbeats para simulação de falhas.
+        """
         if child_conn in self.blocked_downlinks:
             self.blocked_downlinks.remove(child_conn)
-            print(f"[Network Control] Heartbeats RESTAURADOS para {child_conn}")
-            return False # Retorna False (não bloqueado)
+            return False 
         else:
             self.blocked_downlinks.add(child_conn)
-            print(f"[Network Control] Heartbeats BLOQUEADOS para {child_conn}")
-            return True # Retorna True (bloqueado)
+            return True 
 
     def get_downlinks_status(self):
-        """Retorna lista de filhos e seu estado de bloqueio para a UI."""
+        """
+        Retorna o status dos downlinks (conectados e bloqueados ou não).
+        """
         status = []
         for child in self.downlink_connections:
             is_blocked = child in self.blocked_downlinks

@@ -1,57 +1,41 @@
-"""
-BLE Discovery using SimplePyBLE
-Provides a wrapper around simplepyble for scanning BLE devices
-"""
-
 import simplepyble
 
 
 class BLEDiscovery:
-    """Wrapper for SimplePyBLE to scan for BLE devices"""
+    """
+    Classe Wrapper para o SimplePyBLE, utilizada para realizar varreduras de dispositivos BLE.
+    """
     
     def __init__(self, adapter_name='hci0'):
         """
-        Initialize BLE scanner
+        Inicializa o scanner BLE.
         
-        Args:
-            adapter_name: Name of the BLE adapter (e.g., 'hci0')
+        :param adapter_name: Nome do adaptador BLE (ex: 'hci0').
         """
         self.adapter_name = adapter_name
         self.adapter = None
         
-        # Get available adapters
         adapters = simplepyble.Adapter.get_adapters()
         
         if not adapters:
-            raise RuntimeError("No BLE adapters found")
+            raise RuntimeError("Nenhum adaptador BLE encontrado")
         
-        # Use the first adapter by default
-        # TODO: Could match by adapter_name if needed
         self.adapter = adapters[0]
-        print(f"[BLEDiscovery] Using adapter: {self.adapter.identifier()} [{self.adapter.address()}]")
+        # print(f"[BLEDiscovery] Usando adaptador: {self.adapter.identifier()} [{self.adapter.address()}]")
     
     def scan(self, duration_ms=10000):
         """
-        Scan for BLE devices
+        Realiza uma varredura por dispositivos BLE.
         
-        Args:
-            duration_ms: Scan duration in milliseconds
-            
-        Returns:
-            List of discovered devices with their information
+        :param duration_ms: Duração da varredura em milissegundos.
+        :return: Lista de dispositivos encontrados com suas informações (MAC, nome, RSSI, Hop Count, NID).
         """
         if not self.adapter:
-            raise RuntimeError("Adapter not initialized")
+            raise RuntimeError("Adaptador não inicializado")
         
-        print(f"[BLEDiscovery] Scanning for {duration_ms}ms...")
-        
-        # Start scanning
         self.adapter.scan_for(duration_ms)
         
-        # Get scan results
         peripherals = self.adapter.scan_get_results()
-        
-        print(f"[BLEDiscovery] Found {len(peripherals)} devices")
         
         devices = []
         for peripheral in peripherals:
@@ -59,17 +43,14 @@ class BLEDiscovery:
                 'mac': peripheral.address(),
                 'name': peripheral.identifier(),
                 'rssi': peripheral.rssi() if hasattr(peripheral, 'rssi') else 0,
-                'hop_count': -1,  # Will be extracted from manufacturer data
+                'hop_count': -1,
                 'nid': None
             }
             
-            # Parse manufacturer data to extract SIC protocol info
             manufacturer_data = peripheral.manufacturer_data()
             
             for company_id, data in manufacturer_data.items():
-                # Check if this is our custom advertisement (0xFFFE)
                 if company_id == 0xFFFE and len(data) >= 17:
-                    # Data format: [hop_count (1 byte)] + [NID (16 bytes)]
                     device_info['hop_count'] = data[0]
                     device_info['nid'] = bytes(data[1:17])
                     break

@@ -4,15 +4,12 @@ from cryptography.hazmat.backends import default_backend
 
 def dtls_hkdf_expand_label(secret, label, context, length):
     """
-    HKDF-Expand-Label from TLS 1.3 / (used loosely here for simplicity)
-    Or TLS 1.2 PRF?
-    Let's stick to a simple HKDF since we are "Simplified DTLS".
+    Implementação simplificada de HKDF-Expand-Label para DTLS.
     """
     # Info = Length(2) | LabelLen(1) | Label | ContextLen(1) | Context
-    # Label is usually "tls " + label
+    # Label prefixado com "dtls13 "
     full_label = b"dtls13 " + label
     
-    info = len(length.to_bytes(2, 'big')) # ? No this creates bytes.
     info = length.to_bytes(2, 'big')
     info += len(full_label).to_bytes(1, 'big')
     info += full_label
@@ -30,29 +27,27 @@ def dtls_hkdf_expand_label(secret, label, context, length):
 
 def derive_key_material(master_secret, server_random, client_random):
     """
-    Derive keys for AES-GCM (16 key + 4 salt usually) from Master Secret.
+    Deriva as chaves para AES-GCM (Key e IV/Salt) a partir do Master Secret.
+    Retorna: client_write_key, server_write_key, client_write_iv, server_write_iv
     """
-    # 2 keys * 16 bytes + 2 IVs * 4 bytes = 40 bytes? 
-    # AES-GCM explicit nonce is 8 bytes, salt is 4.
-    key_len = 16
-    iv_len = 4 # Static part (Salt)
+    key_len = 16 # AES-128
+    iv_len = 4   # Salt parte do IV
     
     total_bytes = (key_len + iv_len) * 2
     
-    # We use HKDF to expand master_secret into key_block
-    # seed = server_random + client_random
+    # Semente HKDF
     seed = server_random + client_random
     
     hkdf = HKDF(
         algorithm=hashes.SHA256(),
         length=total_bytes,
         salt=None,
-        info=b"key expansion" + seed, # Simple info
+        info=b"key expansion" + seed,
         backend=default_backend()
     )
     key_block = hkdf.derive(master_secret)
     
-    # Split
+    # Divide o bloco de chaves
     client_write_key = key_block[0:16]
     server_write_key = key_block[16:32]
     client_write_iv = key_block[32:36]

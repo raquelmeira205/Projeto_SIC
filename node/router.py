@@ -76,7 +76,7 @@ class Router:
         if connection_handle not in self.link_keys:
              # Perform handshake to establish session key
              try:
-                 session_key = self.perform_handshake(connection_handle, is_initiator=True)
+                 session_key, uplink_nid = self.perform_handshake(connection_handle, is_initiator=True)
                  self.link_keys[connection_handle] = session_key
                  self.my_counters[connection_handle] = 0
                  self.replay_counters[connection_handle] = 0
@@ -482,7 +482,7 @@ class Router:
             
             print(f"[Handshake] Concluído com {connection_mac}: {session_key[:8].hex()}...")
             
-            return session_key
+            return session_key, handshake.peer_nid
             
         finally:
             handshake_receive_queue.unregister_transport(connection_mac)
@@ -511,10 +511,22 @@ class Router:
         def _run_handshake():
             try:
                 print(f"[Handshake] Responding to incoming handshake from {peer_mac}")
-                session_key = self.perform_handshake(peer_mac, is_initiator=False)
                 
-                # Store the session key and initialize security state
+                # Receber NID e Atualizar Forwarding Table ---
+                session_key, peer_nid = self.perform_handshake(peer_mac, is_initiator=False)
+                
+                # Guardar chave
                 self.link_keys[peer_mac] = session_key
+                self.my_counters[peer_mac] = 0
+                self.replay_counters[peer_mac] = 0
+                
+                # ATUALIZAR FORWARDING TABLE
+                if peer_nid:
+                    self.forwarding_table[peer_nid] = peer_mac
+                    print(f"[Router] Forwarding Table Atualizada: {peer_nid.hex()[:8]} -> {peer_mac}")
+                else:
+                    print(f"[Router-Alert] Handshake feito mas NID desconhecido para {peer_mac}")
+
                 self.my_counters[peer_mac] = 0
                 self.replay_counters[peer_mac] = 0
                 

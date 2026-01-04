@@ -111,11 +111,27 @@ class BLEManager:
         if not char:
             return False
 
-        try:
-            char.WriteValue(packet, {})
-            return True
-        except Exception:
-            return False
+        # Retry logic for sending packets
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                char.WriteValue(packet, {})
+                return True
+            except Exception as e:
+                err_str = str(e)
+                if "InProgress" in err_str or "Busy" in err_str:
+                     # Transient error, wait and retry
+                     print(f"[BLE] Write busy (attempt {attempt+1}/{max_retries})... waiting")
+                     import time
+                     time.sleep(0.2)
+                     continue
+                
+                print(f"[BLE] WriteValue failed on attempt {attempt+1}: {e}")
+                # If "NotConnected" or similar, maybe stop retrying?
+                if "NotConnected" in err_str:
+                    break
+        
+        return False
 
     def write_value(self, mac, data):
        

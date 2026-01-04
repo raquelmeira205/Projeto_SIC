@@ -245,6 +245,10 @@ class HandshakeReceiveQueue:
             self.transports[mac].add_received_chunk(total_length, chunk_index, chunk_data)
             return True
         return False
+    
+    def has_transport(self, mac):
+        """Check if a transport is registered for this MAC (handshake in progress)."""
+        return mac in self.transports
 
 
 # Global receive queue

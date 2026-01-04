@@ -91,6 +91,16 @@ class SinkConnectionManager:
     def start_advertising(self):
         print("[Sink] A iniciar Advertisement (Hop Count=0)...")
 
+        # If already advertising, unregister first to allow re-advertising
+        # This is needed to remain discoverable after establishing connections
+        if self.advertisement:
+            try:
+                print("[Sink] Unregistering existing advertisement...")
+                self.advertisement.unregister(ADAPTER_PATH)
+            except Exception as e:
+                print(f"[Sink] Warning: Could not unregister existing advertisement: {e}")
+            self.advertisement = None
+
         self.advertisement = Advertisement(
             self.bus,
             index=0,
@@ -145,17 +155,11 @@ class SinkConnectionManager:
              
         key = self.session_keys[mac]
         
-        # Initialize counter if needed (should come from handshake)
-        if mac not in self.replay_counters:
-             # This assumes we are sending. We need our own outgoing counter?
-             # SinkConnectionManager didn't have 'my_counters'. 
-             # We should add it or use a separate counter mechanism.
-             # For simplicity, let's add 'out_counters' to manager.
-             pass
+        # --- FIX: Garantir que a KEY é bytes ---
+        if not isinstance(key, bytes):
+            print(f"[Sink-Error] A chave de sessão para {mac} não é bytes! É {type(key)}")
+            return False
 
-        # NOTE: The Router class separates 'replay_counters' (incoming) and 'my_counters' (outgoing).
-        # SinkConnectionManager seems to only have had 'replay_counters'.
-        # We need to track outgoing sequence numbers per-connection to avoid replay attacks on the Node side.
         if not hasattr(self, 'out_counters'):
              self.out_counters = {}
              
@@ -165,13 +169,36 @@ class SinkConnectionManager:
         self.out_counters[mac] += 1
         seq = self.out_counters[mac]
         
+        # --- FIX: Garantir que o PAYLOAD é bytes ---
+        if payload is None:
+            payload = b''
+        elif isinstance(payload, str):
+            payload = payload.encode('utf-8')
+        elif not isinstance(payload, bytes):
+            # Tenta converter qualquer outra coisa (int, json object, etc)
+            try:
+                payload = bytes(payload)
+            except:
+                print(f"[Sink-Error] Payload inválido (não convertível para bytes): {type(payload)}")
+                return False
+
         # 1. Pack with Zero MAC
-        temp_packet = PacketHeader.pack(src, dest, msg_type, payload, seq, b'\x00'*32)
+        # O PacketHeader.pack deve retornar bytes. Se não retornar, temos problema no packet_structs.
+        try:
+            temp_packet = PacketHeader.pack(src, dest, msg_type, payload, seq, b'\x00'*32)
+            if not isinstance(temp_packet, bytes):
+                temp_packet = bytes(temp_packet)
+        except Exception as e:
+            print(f"[Sink-Error] Falha no PacketHeader.pack: {e}")
+            return False
         
         # 2. Calculate MAC
-        # We need generate_mac from common.crypto_utils
-        from common.crypto_utils import generate_mac
-        auth_mac = generate_mac(key, temp_packet)
+        try:
+            from common.crypto_utils import generate_mac
+            auth_mac = generate_mac(key, temp_packet)
+        except Exception as e:
+            print(f"[Sink-Error] Erro crítico ao gerar MAC (Key type: {type(key)}, Data type: {type(temp_packet)}): {e}")
+            return False
         
         # 3. Final Pack
         final_packet = PacketHeader.pack(src, dest, msg_type, payload, seq, auth_mac)
@@ -364,6 +391,11 @@ class SinkConnectionManager:
                  self.out_counters = {}
             self.out_counters[peer_mac] = 0
             
+            # Restart advertising to remain discoverable for other nodes
+            # BlueZ stops advertising when a connection is established
+            print(f"[Sink] Re-advertising to remain discoverable after connection...")
+            self.start_advertising()
+            
             return session_key
         finally:
             handshake_receive_queue.unregister_transport(peer_mac)
@@ -419,7 +451,11 @@ class RxCharacteristic(Characteristic):
                 
                 # If this is the first chunk, start handshake in background FIRST
                 # This registers the transport before we try to route the chunk
-                if chunk_index == 0 and mac not in self.pending_handshakes:
+                # BUT only if we don't already have a session key or handshake in progress
+                if (chunk_index == 0 and 
+                    mac not in self.conn_manager.session_keys and
+                    mac not in self.pending_handshakes and
+                    not handshake_receive_queue.has_transport(mac)):
                     def run_handshake():
                         try:
                             self.conn_manager.perform_handshake(mac)
@@ -429,6 +465,7 @@ class RxCharacteristic(Characteristic):
                             if mac in self.pending_handshakes:
                                 del self.pending_handshakes[mac]
                     
+                    print(f"[Sink-Handshake] Starting responder handshake with {mac}")
                     t = threading.Thread(target=run_handshake, daemon=True)
                     t.start()
                     self.pending_handshakes[mac] = t
@@ -456,6 +493,18 @@ class RxCharacteristic(Characteristic):
              # 1. Unpack Packet
             src_nid, dest_nid, msg_type, payload, seq_num, received_mac = PacketHeader.unpack(val_bytes)
             
+            ## mecanismo de defesa erro de bytes
+            if payload is None:
+                payload = b''
+            elif isinstance(payload, str):
+                try:
+                    payload = payload.encode('utf-8')
+                except:
+                    payload = b''
+            elif not isinstance(payload, bytes):
+                return # Ignora silenciosamente para não crashar
+
+
             # 2. Security Verification
             if mac not in self.conn_manager.session_keys:
                 print(f"[!] Security Alert: Received packet from {mac} without active session")

@@ -178,22 +178,30 @@ class Router:
                 self._handle_heartbeat(payload, incoming_conn, src)
             
             elif mtype == MsgType.DTLS_HANDSHAKE:
-                # Pass to DTLS Client
-                if self.dtls_session:
-                    prev_state = self.dtls_session.state.value
-                    self.dtls_session.handle_handshake_message(payload)
-                    new_state = self.dtls_session.state.value
-                    
-                    # check for transition to ESTABLISHED (4)
-                    if prev_state != 4 and new_state == 4:
-                        print(f"[Router] DTLS Session Established! Flushing {len(self.pending_dtls_packets)} pending packets.")
-                        while self.pending_dtls_packets:
-                            p_dest, p_payload = self.pending_dtls_packets.pop(0)
-                            self.send_app_data(p_dest, p_payload)
+                # Check if this DTLS packet is for us or needs routing
+                if dest == self.my_nid:
+                    # DTLS packet destined for this node - process locally
+                    if self.dtls_session:
+                        prev_state = self.dtls_session.state.value
+                        self.dtls_session.handle_handshake_message(payload)
+                        new_state = self.dtls_session.state.value
+                        
+                        # check for transition to ESTABLISHED (4)
+                        if prev_state != 4 and new_state == 4:
+                            print(f"[Router] DTLS Session Established! Flushing {len(self.pending_dtls_packets)} pending packets.")
+                            while self.pending_dtls_packets:
+                                p_dest, p_payload = self.pending_dtls_packets.pop(0)
+                                self.send_app_data(p_dest, p_payload)
+                else:
+                    # DTLS packet for another node - route transparently
+                    # Intermediate node cannot see DTLS content (end-to-end encryption)
+                    print(f"[Router] Routing DTLS packet: {src.hex()[:8]}... -> {dest.hex()[:8]}...")
+                    self._route_data(src, dest, payload, MsgType.DTLS_HANDSHAKE)
             
             elif mtype == MsgType.DATA:
-                if src == self.sink_nid and self.dtls_session:
-                    # Try decrypt
+                # Check if this is DTLS-encrypted data for us
+                if dest == self.my_nid and src == self.sink_nid and self.dtls_session:
+                    # DATA packet from Sink destined for us - try DTLS decrypt
                     try:
                         from common.dtls_structs import ContentType
                         ctype, plaintext = self.dtls_session.recv(payload)
@@ -204,7 +212,7 @@ class Router:
                     except Exception as e:
                         print(f"[Router] Decrypt/Process error: {e}")
                 else:
-                    # Regular routing or unknown source
+                    # Regular routing (either not for us, or not DTLS-encrypted)
                     self._route_data(src, dest, payload)            
 
             elif mtype == MsgType.CONTROL:

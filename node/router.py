@@ -143,16 +143,18 @@ class Router:
             # 2. Security Checks (skip MAC verification for HEARTBEAT - uses signature instead)
             if mtype != MsgType.HEARTBEAT:
                 
-                if src not in self.link_keys:
-                    print(f"[Router] Ignorando pacote seguro de {src.hex()[:8]}... (Sem chave de sessão)")
+                if incoming_conn not in self.link_keys:
+                    print(f"[Router] Ignorando pacote seguro de {incoming_conn}... (Sem chave de sessão)")
+                    # Debug: print keys available
+                    # print(f"  Available keys: {list(self.link_keys.keys())}")
                     return
 
                 # --- CORREÇÃO: Extrair chave do tuplo se necessário ---
-                raw_key = self.link_keys[src]
+                raw_key = self.link_keys[incoming_conn]
                 
                 # 1. Se for Tuplo, extrair o primeiro elemento
                 if isinstance(raw_key, tuple):
-                    # print(f"[Router-Fix] A corrigir chave em tuplo para {src.hex()[:8]}")
+                    # print(f"[Router-Fix] A corrigir chave em tuplo para {incoming_conn}")
                     key = raw_key[0]
                 else:
                     key = raw_key
@@ -249,12 +251,12 @@ class Router:
         
         # Se a chave não foi passada limpa, tenta buscar (mas cuidado com o tuplo)
         if session_key is None:
-            if src_nid in self.link_keys:
-                session_key = self.link_keys[src_nid]
+            if conn in self.link_keys:
+                session_key = self.link_keys[conn]
                 if isinstance(session_key, tuple):
                     session_key = session_key[0]  # Extrair do tuplo aqui também
             else:
-                print(f"[!] Sem chave de sessão para {src_nid.hex()[:8]}... - handshake não realizado")
+                print(f"[!] Sem chave de sessão para {conn}... - handshake não realizado")
                 return False
         
         key = session_key

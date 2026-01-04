@@ -142,7 +142,29 @@ class Router:
 
             # 2. Security Checks (skip MAC verification for HEARTBEAT - uses signature instead)
             if mtype != MsgType.HEARTBEAT:
-                if not self._verify_security(incoming_conn, packet_data, seq, mac):
+                
+                if src not in self.link_keys:
+                    print(f"[Router] Ignorando pacote seguro de {src.hex()[:8]}... (Sem chave de sessão)")
+                    return
+
+                # --- CORREÇÃO: Extrair chave do tuplo se necessário ---
+                raw_key = self.link_keys[src]
+                
+                # 1. Se for Tuplo, extrair o primeiro elemento
+                if isinstance(raw_key, tuple):
+                    # print(f"[Router-Fix] A corrigir chave em tuplo para {src.hex()[:8]}")
+                    key = raw_key[0]
+                else:
+                    key = raw_key
+                
+                # 2. Garantir que é bytes
+                if not isinstance(key, bytes):
+                    print(f"[Router-Erro] Chave inválida (Tipo: {type(key)}).")
+                    return
+                # --------------------------------------------------------
+
+                # Agora passamos a 'key' limpa para a verificação
+                if not self._verify_security(incoming_conn, packet_data, seq, mac, session_key=key):
                     print(f"[!] Falha de segurança no pacote de {incoming_conn}")
                     return
 
@@ -206,16 +228,28 @@ class Router:
         except Exception as e:
             print(f"Packet Error: {e}")
 
-    def _verify_security(self, conn, packet_data, seq, received_mac):
+    def _verify_security(self, conn, packet_data, seq, received_mac, session_key=None):
+        """
+        Verifica a integridade do pacote.
+        Agora aceita session_key opcional para não ter de buscar ao dict novamente.
+        """
         # Se for loopback/processamento local, assumir seguro ou tratar diferente
         if conn is None: 
             return True
-            
-        # 1. Retrieve Key
-        if conn not in self.link_keys:
-            print(f"[!] Sem chave de sessão para {conn} - handshake não realizado")
-            return False
-        key = self.link_keys[conn]
+        
+        src_nid = packet_data[0:16]  # Assumindo estrutura do header
+        
+        # Se a chave não foi passada limpa, tenta buscar (mas cuidado com o tuplo)
+        if session_key is None:
+            if src_nid in self.link_keys:
+                session_key = self.link_keys[src_nid]
+                if isinstance(session_key, tuple):
+                    session_key = session_key[0]  # Extrair do tuplo aqui também
+            else:
+                print(f"[!] Sem chave de sessão para {src_nid.hex()[:8]}... - handshake não realizado")
+                return False
+        
+        key = session_key
         
         # 2. Reconstruct Header with Zero MAC for verification
         # Necessitamos de reconstruir o cabeçalho exato usado para gerar o MAC
@@ -332,7 +366,15 @@ class Router:
              print(f"[!] Sem chave de sessão para {conn} - não é possível enviar")
              return False
              
-        key = self.link_keys[conn]
+        raw_key = self.link_keys[conn]
+        
+        # --- CORREÇÃO: Extrair chave do tuplo se necessário ---
+        # 1. Se for Tuplo, extrair o primeiro elemento
+        if isinstance(raw_key, tuple):
+            key = raw_key[0]
+        else:
+            key = raw_key
+        # --------------------------------------------------------
         
         # --- Type validation and conversion ---
         # Ensure key is bytes
@@ -424,20 +466,9 @@ class Router:
             
             # Get session key
             session_key = handshake.session_key
-            print(f"[Handshake-Debug] Raw session_key type: {type(session_key)}, value: {session_key if not isinstance(session_key, bytes) else session_key[:16].hex() + '...'}")
-            
-            # Validate and fix type if needed
-            if isinstance(session_key, tuple):
-                print(f"[Handshake-Warning] session_key is tuple with {len(session_key)} elements")
-                print(f"[Handshake-Debug] Tuple contents: {[type(x) for x in session_key]}")
-                session_key = session_key[0] if session_key else None
-                print(f"[Handshake-Debug] After extraction: type={type(session_key)}")
-            
-            if not isinstance(session_key, bytes):
-                raise RuntimeError(f"Session key is not bytes! Type: {type(session_key)}, Value: {session_key}\n {session_key}")
             
             if not session_key or len(session_key) != 32:
-                raise RuntimeError(f"Invalid session key derived: len={len(session_key) if session_key else 0}")
+                raise RuntimeError("Invalid session key derived")
             
             print(f"[Handshake] Concluído com {connection_mac}: {session_key[:8].hex()}...")
             
@@ -471,10 +502,6 @@ class Router:
             try:
                 print(f"[Handshake] Responding to incoming handshake from {peer_mac}")
                 session_key = self.perform_handshake(peer_mac, is_initiator=False)
-                
-                # Validate session key type (should already be validated by perform_handshake)
-                if not isinstance(session_key, bytes):
-                    raise TypeError(f"Session key is not bytes! Type: {type(session_key)}")
                 
                 # Store the session key and initialize security state
                 self.link_keys[peer_mac] = session_key

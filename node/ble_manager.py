@@ -111,27 +111,20 @@ class BLEManager:
         if not char:
             return False
 
-        # Retry logic for sending packets
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                char.WriteValue(packet, {})
-                return True
-            except Exception as e:
-                err_str = str(e)
-                if "InProgress" in err_str or "Busy" in err_str:
-                     # Transient error, wait and retry
-                     print(f"[BLE] Write busy (attempt {attempt+1}/{max_retries})... waiting")
-                     import time
-                     time.sleep(0.2)
-                     continue
-                
-                print(f"[BLE] WriteValue failed on attempt {attempt+1}: {e}")
-                # If "NotConnected" or similar, maybe stop retrying?
-                if "NotConnected" in err_str:
-                    break
-        
-        return False
+        try:
+            char.WriteValue(packet, {})
+            return True
+        except Exception as e:
+            err = str(e)
+            print(f"[Node] Erro ao enviar para {dest_mac}: {e}")
+
+            if "UnknownObject" in err or "doesn't exist" in err:
+                print(f"[Node] Detectada perda de acesso GATT a {dest_mac}. Assumindo desconexão.")
+                if self.router_callback_disconnect:
+                    self.router_callback_disconnect(dest_mac)
+
+            return False
+
 
     def write_value(self, mac, data):
        

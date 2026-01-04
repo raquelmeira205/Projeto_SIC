@@ -5,6 +5,7 @@ from common.crypto_utils import generate_mac, verify_mac
 from common.security_handshake import SecurityHandshake
 from common.ble_handshake_transport import BLEHandshakeTransport, handshake_receive_queue
 from common.crl_manager import CRLManager
+from common.pki_utils import extract_nid_from_cert
 
 HEARTBEAT_INTERVAL = 5.0
 MAX_MISSED = 3
@@ -43,6 +44,10 @@ class Router:
         self.last_heartbeat_time = 0
         self.last_heartbeat_seq = -1
         self.hops_to_sink = -1
+
+        # Downlink Monitoring Config
+        self.downlink_missed_heartbeats = {} # connection -> missed_count
+
 
         self._stop_monitor = False
         
@@ -334,12 +339,29 @@ class Router:
         # Re-encapsulate heartbeat for downlinks
         # Forward heartbeat from Sink to all downlink nodes
         # Use actual Sink NID as source (not zeros)
-        for child in self.downlink_connections:
+        failed_downlinks = []
+        for child in list(self.downlink_connections): # Copy list to modify safe
             if child in self.blocked_downlinks:
                 continue 
             # Send heartbeat with correct Sink NID as source
             # Destination should be broadcast (all zeros) or the child's NID
-            self._send_authenticated_packet(child, src_nid, b'\x00'*16, MsgType.HEARTBEAT, payload)
+            if not self._send_authenticated_packet(child, src_nid, b'\x00'*16, MsgType.HEARTBEAT, payload):
+                print(f"[Router] Falha ao enviar heartbeat para {child}")
+                failed_downlinks.append(child)
+            else:
+                # Reset missed count if successful (optional, as we don't count success here, only failures are critical)
+                pass
+
+        # Handle failed downlinks immediately
+        for child in failed_downlinks:
+            count = self.downlink_missed_heartbeats.get(child, 0) + 1
+            self.downlink_missed_heartbeats[child] = count
+            print(f"[Router] Downlink {child} missed heartbeat ({count}/{MAX_MISSED})")
+            
+            if count >= MAX_MISSED:
+                print(f"[Router] Downlink {child} DEAD. Disconnecting...")
+                self.ble.disconnect_from_device(child)
+                self.handle_disconnection(child)
 
     def _monitor_heartbeat_timeout(self):
         while not self._stop_monitor:
@@ -355,6 +377,8 @@ class Router:
         
         if conn in self.downlink_connections:
             self.downlink_connections.remove(conn)
+        if conn in self.downlink_missed_heartbeats:
+            del self.downlink_missed_heartbeats[conn]
 
         if conn == self.uplink_connection:
             self.uplink_connection = None
@@ -532,7 +556,17 @@ class Router:
                 
                 # Add to downlink connections
                 self.downlink_connections.add(peer_mac)
+                self.downlink_missed_heartbeats[peer_mac] = 0
                 
+                # Extract peer NID from cert to update forwarding table
+                if handshake.peer_cert:
+                    try:
+                        peer_nid = extract_nid_from_cert(handshake.peer_cert)
+                        if peer_nid:
+                             self._update_forwarding_table(peer_nid, peer_mac)
+                    except Exception as e:
+                        print(f"[Router] Failed to extract NID from peer cert: {e}")
+
                 print(f"[Handshake] Incoming handshake from {peer_mac} completed successfully")
                 
             except Exception as e:
@@ -543,6 +577,10 @@ class Router:
         
         # Run handshake in background thread to avoid blocking
         threading.Thread(target=_run_handshake, daemon=True).start()
+
+    def _update_forwarding_table(self, nid_bytes, mac_addr):
+        self.forwarding_table[nid_bytes] = mac_addr
+        print(f"[Router] Forwarding Table Updated: {nid_bytes.hex()[:8]}... -> {mac_addr}")
 
     def toggle_heartbeat_block(self, child_conn):
         """Ativa/Desativa o envio de heartbeats para um filho específico."""

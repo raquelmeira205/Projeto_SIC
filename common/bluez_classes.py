@@ -1,6 +1,10 @@
 import sys
 from pydbus import SystemBus
 from gi.repository import GLib
+# Use absolute import logic or sys.path hack should be already present in main.py, 
+# but inside this package we can use relative import if loaded as package, 
+# or direct import if sys.path is set.
+# Assuming sys.path is set correctly by main files.
 from common.ble_utils import ADAPTER_PATH
 
 # Constantes DBus
@@ -16,10 +20,15 @@ GATT_DESC_IFACE = 'org.bluez.GattDescriptor1'
 
 BLUEZ_SERVICE_NAME = 'org.bluez'
 
+from gi.repository import GLib
+
+BLUEZ_SERVICE_NAME = 'org.bluez'
+LE_ADVERTISEMENT_IFACE = 'org.bluez.LEAdvertisement1'
+
 
 class Advertisement(object):
     """
-    Abstração D-Bus para Advertisement LEAdvertisement1 do BlueZ.
+    BlueZ LEAdvertisement1 (pydbus compatible, spec-correct)
     """
     dbus = f"""
     <node>
@@ -51,15 +60,20 @@ class Advertisement(object):
         self.appearance = None
         self.include_tx_power = False
         
-        self._discoverable = None
+        # Discoverable properties (optional, only for Sink)
+        self._discoverable = None  # None = not set, don't expose property
         self._discoverable_timeout = None
 
         self.registration = None
     
     def set_discoverable(self, discoverable=True, timeout=0):
-        """Habilita o modo descobrível (útil para o Sink)."""
+        """Enable discoverable mode (for Sink)."""
         self._discoverable = discoverable
         self._discoverable_timeout = timeout
+
+    # ---------------------------------------------------------------------
+    # Helpers
+    # ---------------------------------------------------------------------
 
     def get_path(self):
         return self.path
@@ -79,6 +93,10 @@ class Advertisement(object):
         if isinstance(data, list):
             data = bytes(data)
         self.service_data[uuid] = GLib.Variant('ay', data)
+
+    # ---------------------------------------------------------------------
+    # DBus properties (exact BlueZ spec)
+    # ---------------------------------------------------------------------
 
     @property
     def Type(self):
@@ -117,31 +135,38 @@ class Advertisement(object):
     
     @property
     def Discoverable(self):
+        # Return False if not explicitly set (for Sink only)
         return self._discoverable if self._discoverable is not None else False
     
     @property
     def DiscoverableTimeout(self):
+        # Return 0 if not explicitly set
         return self._discoverable_timeout if self._discoverable_timeout is not None else 0
 
+    # ---------------------------------------------------------------------
+    # Lifecycle
+    # ---------------------------------------------------------------------
+
     def Release(self):
-        print(f"{self.path}: Liberado pelo BlueZ")
+        print(f"{self.path}: Released by BlueZ")
 
     def register(self, adapter_path):
-        """Registra o advertisement no BlueZ Manager."""
+        # Ensure adapter is powered
         props = self.bus.get(BLUEZ_SERVICE_NAME, adapter_path)['org.freedesktop.DBus.Properties']
         props.Set('org.bluez.Adapter1', 'Powered', GLib.Variant('b', True))
 
+        # Export object
         self.registration = self.bus.register_object(
             self.path,
             self,
-            self.dbus
+            self.dbus      # <-- REQUIRED
         )
 
-        print(f"Registrando advertisement em {self.path}")
+        print(f"Registering advertisement at {self.path}")
         lem = self.bus.get(BLUEZ_SERVICE_NAME, adapter_path)['org.bluez.LEAdvertisingManager1']
         lem.RegisterAdvertisement(self.path, {})
 
-        print("Advertisement registrado")
+        print("Advertisement registered")
 
     def unregister(self, adapter_path):
         try:
@@ -151,12 +176,13 @@ class Advertisement(object):
             if self.registration:
                 self.registration.unregister()
                 self.registration = None
-            print("Advertisement cancelado")
+            print("Advertisement unregistered")
+
 
 
 class Service(object):
     """
-    Abstração D-Bus para Serviço GATT.
+    GATT Service
     """
     dbus = f"""
     <node>
@@ -196,7 +222,7 @@ class Service(object):
 
 class Characteristic(object):
     """
-    Abstração D-Bus para Característica GATT.
+    GATT Characteristic
     """
     dbus = f"""
     <node>
@@ -234,9 +260,11 @@ class Characteristic(object):
         return self.path
 
     def ReadValue(self, options):
+        # Default implementation
         return self.value
 
     def WriteValue(self, value, options):
+        # Default implementation
         self.value = value
 
     def StartNotify(self):
@@ -267,8 +295,8 @@ class Characteristic(object):
 
 class Application(object):
     """
-    Gerenciador de Aplicação GATT.
-    Exporta a interface ObjectManager para o BlueZ descobrir serviços/características.
+    GATT Application Manager.
+    Exports the ObjectManager interface for BlueZ to discover services/characteristics.
     """
     dbus = f"""
     <node>
@@ -292,12 +320,14 @@ class Application(object):
         self.services.append(service)
 
     def GetManagedObjects(self):
-        # print(f"DEBUG: GetManagedObjects called on {self.path}")
+        print(f"DEBUG: GetManagedObjects called on {self.path}")
         response = {}
         for service in self.services:
+            # Service Properties
             service_props = {
                 'UUID': GLib.Variant('s', service.UUID),
                 'Primary': GLib.Variant('b', service.Primary),
+                # Add list of characteristic paths
                 'Characteristics': GLib.Variant('ao', [c.get_path() for c in service.characteristics])
             }
             response[service.get_path()] = {
@@ -305,31 +335,36 @@ class Application(object):
             }
             
             for chrc in service.characteristics:
+                # Characteristic Properties
                 chrc_props = {
                     'UUID': GLib.Variant('s', chrc.UUID),
                     'Service': GLib.Variant('o', chrc.Service),
                     'Flags': GLib.Variant('as', chrc.Flags),
+                    # Add list of descriptor paths (empty for now)
                     'Descriptors': GLib.Variant('ao', []) 
                 }
                 response[chrc.get_path()] = {
                     GATT_CHRC_IFACE: chrc_props
                 }
+        print(f"DEBUG: GetManagedObjects Response: {response}")
         return response
 
     def register(self):
-        """Registra a Aplicação GATT no BlueZ."""
+        # Register App with GATT Manager
         gatt_manager = self.bus.get(BLUEZ_SERVICE_NAME, ADAPTER_PATH)['org.bluez.GattManager1']
         
+        # Publish Object Manager (Application)
         self.registration = self.bus.register_object(self.path, self, self.dbus)
         
+        # Publish children (Services/Chars)
         for service in self.services:
             self.bus.register_object(service.get_path(), service, service.dbus)
             for chrc in service.characteristics:
                 self.bus.register_object(chrc.get_path(), chrc, chrc.dbus)
                 
-        print('Registrando Aplicação GATT...')
+        print('Registering GATT Application...')
         gatt_manager.RegisterApplication(self.path, {})
-        print('Aplicação GATT registrada.')
+        print('GATT Application registered.')
 
     def run(self):
         loop = GLib.MainLoop()

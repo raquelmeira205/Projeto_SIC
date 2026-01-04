@@ -7,8 +7,8 @@ AGENT_PATH = '/org/bluez/sic_agent'
 
 class BLEAgent(object):
     """
-    Implementação do Agente BlueZ (Agent1) para lidar com solicitações de pareamento/segurança.
-    Configurado como 'NoInputNoOutput' para facilitar o pareamento 'Just Works'.
+    BlueZ Agent1 implementation for handling pairing/security requests.
+    Configured for NoInputNoOutput to facilitate 'Just Works' pairing.
     """
     dbus = f"""
     <node>
@@ -66,11 +66,12 @@ class BLEAgent(object):
         return 0
 
     def DisplayPasskey(self, device, passkey, entered):
+        # print(f"DisplayPasskey {device} {passkey} reached={entered}")
         pass
 
     def RequestConfirmation(self, device, passkey):
         print(f"[Agent] RequestConfirmation {device} {passkey}")
-        # Auto-aceitar para 'Just Works'
+        # Auto-accept for Just Works
         return
 
     def RequestAuthorization(self, device):
@@ -78,24 +79,26 @@ class BLEAgent(object):
         return
 
     def AuthorizeService(self, device, uuid):
+        # print(f"AuthorizeService {device} {uuid}")
         return
 
     def Cancel(self):
         print("[Agent] Cancel")
 
     def register(self):
-        """Registra o objeto Agent no D-Bus e no BlueZ AgentManager."""
+        # Register Agent Object on DBus
         try:
             self.bus.register_object(self.path, self, self.dbus)
             
+            # Register with AgentManager
             manager = self.bus.get('org.bluez', '/org/bluez')['org.bluez.AgentManager1']
             
-            print(f"[Agent] Registrando Agente em {self.path}")
+            print(f"[Agent] Registering Agent at {self.path}")
             manager.RegisterAgent(self.path, "NoInputNoOutput")
             
-            print("[Agent] Solicitando Agente Padrão")
+            print("[Agent] Requesting Default Agent")
             manager.RequestDefaultAgent(self.path)
             
-            print("[Agent] Agente registrado com sucesso")
+            print("[Agent] Agent registered successfully")
         except Exception as e:
-            print(f"[!] Falha no registro do Agente: {e}")
+            print(f"[!] Agent registration failed: {e}")

@@ -71,7 +71,10 @@ class RxCharacteristic(Characteristic):
                     print(f"[RX-Handshake] Chunk {chunk_index} from {mac}")
                     
                     # If this is the first chunk from an unknown MAC, trigger incoming handshake
-                    if chunk_index == 0 and mac not in self.router.link_keys:
+                    # BUT only if we don't already have a handshake in progress (no transport registered)
+                    if (chunk_index == 0 and 
+                        mac not in self.router.link_keys and 
+                        not handshake_receive_queue.has_transport(mac)):
                         print(f"[RX-Handshake] First chunk from unknown peer {mac}, triggering handshake response")
                         self.router.handle_incoming_handshake(mac)
                     

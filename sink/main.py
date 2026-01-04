@@ -412,7 +412,11 @@ class RxCharacteristic(Characteristic):
                 
                 # If this is the first chunk, start handshake in background FIRST
                 # This registers the transport before we try to route the chunk
-                if chunk_index == 0 and mac not in self.pending_handshakes:
+                # BUT only if we don't already have a session key or handshake in progress
+                if (chunk_index == 0 and 
+                    mac not in self.conn_manager.session_keys and
+                    mac not in self.pending_handshakes and
+                    not handshake_receive_queue.has_transport(mac)):
                     def run_handshake():
                         try:
                             self.conn_manager.perform_handshake(mac)
@@ -422,6 +426,7 @@ class RxCharacteristic(Characteristic):
                             if mac in self.pending_handshakes:
                                 del self.pending_handshakes[mac]
                     
+                    print(f"[Sink-Handshake] Starting responder handshake with {mac}")
                     t = threading.Thread(target=run_handshake, daemon=True)
                     t.start()
                     self.pending_handshakes[mac] = t

@@ -84,6 +84,16 @@ class SinkConnectionManager:
     def start_advertising(self):
         print("[Sink] A iniciar Advertisement (Hop Count=0)...")
 
+        # If already advertising, unregister first to allow re-advertising
+        # This is needed to remain discoverable after establishing connections
+        if self.advertisement:
+            try:
+                print("[Sink] Unregistering existing advertisement...")
+                self.advertisement.unregister(ADAPTER_PATH)
+            except Exception as e:
+                print(f"[Sink] Warning: Could not unregister existing advertisement: {e}")
+            self.advertisement = None
+
         self.advertisement = Advertisement(
             self.bus,
             index=0,
@@ -356,6 +366,11 @@ class SinkConnectionManager:
             if not hasattr(self, 'out_counters'):
                  self.out_counters = {}
             self.out_counters[peer_mac] = 0
+            
+            # Restart advertising to remain discoverable for other nodes
+            # BlueZ stops advertising when a connection is established
+            print(f"[Sink] Re-advertising to remain discoverable after connection...")
+            self.start_advertising()
             
             return session_key
         finally:

@@ -425,6 +425,14 @@ class Router:
             # Get session key
             session_key = handshake.session_key
             
+            # Validate and fix type if needed
+            if isinstance(session_key, tuple):
+                print(f"[Handshake-Warning] session_key is tuple, extracting first element")
+                session_key = session_key[0] if session_key else None
+            
+            if not isinstance(session_key, bytes):
+                raise RuntimeError(f"Session key is not bytes! Type: {type(session_key)}")
+            
             if not session_key or len(session_key) != 32:
                 raise RuntimeError("Invalid session key derived")
             
@@ -460,6 +468,10 @@ class Router:
             try:
                 print(f"[Handshake] Responding to incoming handshake from {peer_mac}")
                 session_key = self.perform_handshake(peer_mac, is_initiator=False)
+                
+                # Validate session key type (should already be validated by perform_handshake)
+                if not isinstance(session_key, bytes):
+                    raise TypeError(f"Session key is not bytes! Type: {type(session_key)}")
                 
                 # Store the session key and initialize security state
                 self.link_keys[peer_mac] = session_key

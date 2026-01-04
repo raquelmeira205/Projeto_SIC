@@ -547,7 +547,7 @@ class Router:
         def _run_handshake():
             try:
                 print(f"[Handshake] Responding to incoming handshake from {peer_mac}")
-                session_key = self.perform_handshake(peer_mac, is_initiator=False)
+                session_key, peer_cert = self.perform_handshake(peer_mac, is_initiator=False)
                 
                 # Store the session key and initialize security state
                 self.link_keys[peer_mac] = session_key
@@ -559,9 +559,9 @@ class Router:
                 self.downlink_missed_heartbeats[peer_mac] = 0
                 
                 # Extract peer NID from cert to update forwarding table
-                if handshake.peer_cert:
+                if peer_cert:
                     try:
-                        peer_nid = extract_nid_from_cert(handshake.peer_cert)
+                        peer_nid = extract_nid_from_cert(peer_cert)
                         if peer_nid:
                              self._update_forwarding_table(peer_nid, peer_mac)
                     except Exception as e:

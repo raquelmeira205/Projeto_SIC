@@ -301,25 +301,21 @@ class Router:
                     self.stats["lost_heartbeats"] += 1
                     self.ble.disconnect_from_device(self.uplink_connection) 
 
-    def handle_disconnection(self, mac):
-        print(f"[Router] Downlink desconectado: {mac}")
+    def handle_disconnection(self, conn):
+        to_del = [n for n, c in self.forwarding_table.items() if c == conn]
+        for n in to_del: del self.forwarding_table[n]
+        
+        if conn in self.downlink_connections:
+            self.downlink_connections.remove(conn)
 
-        # 1. Remover da lista de downlinks
-        if mac in self.downlink_connections:
-            self.downlink_connections.remove(mac)
+        if conn == self.uplink_connection:
+            self.uplink_connection = None
+            self.hops_to_sink = -1
+            self.forwarding_table.clear()
 
-        # 2. Limpar estado de segurança
-        self.link_keys.pop(mac, None)
-        self.replay_counters.pop(mac, None)
-        self.my_counters.pop(mac, None)
-
-        # 3. Limpar forwarding table
-        dead = [nid for nid, hop in self.forwarding_table.items() if hop == mac]
-        for nid in dead:
-            del self.forwarding_table[nid]
-
-        print(f"[Router] Cleanup completo para {mac}")
-
+            kids = list(self.downlink_connections)
+            for k in kids: self.ble.disconnect_from_device(k)
+            self.downlink_connections.clear()
 
     def _route_data(self, src, dest, payload, msg_type=MsgType.DATA):
         target_conn = None

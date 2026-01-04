@@ -114,17 +114,8 @@ class BLEManager:
         try:
             char.WriteValue(packet, {})
             return True
-        except Exception as e:
-            err = str(e)
-            print(f"[Node] Erro ao enviar para {dest_mac}: {e}")
-
-            if "UnknownObject" in err or "doesn't exist" in err:
-                print(f"[Node] Detectada perda de acesso GATT a {dest_mac}. Assumindo desconexão.")
-                if self.router_callback_disconnect:
-                    self.router_callback_disconnect(dest_mac)
-
+        except Exception:
             return False
-
 
     def write_value(self, mac, data):
        

@@ -13,6 +13,7 @@ from common.pki_utils import read_nid_from_cert
 from common.ble_handshake_transport import handshake_receive_queue
 from common.ble_agent import BLEAgent
 from node.ble_manager import BLEManager
+from common.packet_structs import PacketHeader
 from node.router import Router
 from node.cli_ui import NodeCLI
 from cryptography import x509
@@ -93,6 +94,26 @@ class RxCharacteristic(Characteristic):
                 pass  # Not handshake data, process normally
         
         print(f"[RX] {len(data)} bytes de {mac}")
+
+        try:
+            # 1. Abrir o pacote para verificar o payload
+            src, dest, msg_type, payload, seq, mac_sig = PacketHeader.unpack(data)
+            packet_changed = False
+
+            # 2. Corrigir se o payload não for bytes (isto evita o erro "Key... must be bytes")
+            if payload is None:
+                payload = b''
+                packet_changed = True
+            elif isinstance(payload, str):
+                payload = payload.encode('utf-8')
+                packet_changed = True
+            
+            # 3. Se corrigimos, voltamos a fechar o pacote em bytes
+            if packet_changed:
+                data = PacketHeader.pack(src, dest, msg_type, payload, seq, mac_sig)
+        except Exception:
+            pass # Se o pacote estiver inválido, deixa o router lidar com ele
+            
         self.router.process_incoming_packet(data, mac)
 
 

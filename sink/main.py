@@ -148,17 +148,11 @@ class SinkConnectionManager:
              
         key = self.session_keys[mac]
         
-        # Initialize counter if needed (should come from handshake)
-        if mac not in self.replay_counters:
-             # This assumes we are sending. We need our own outgoing counter?
-             # SinkConnectionManager didn't have 'my_counters'. 
-             # We should add it or use a separate counter mechanism.
-             # For simplicity, let's add 'out_counters' to manager.
-             pass
+        # --- FIX: Garantir que a KEY é bytes ---
+        if not isinstance(key, bytes):
+            print(f"[Sink-Error] A chave de sessão para {mac} não é bytes! É {type(key)}")
+            return False
 
-        # NOTE: The Router class separates 'replay_counters' (incoming) and 'my_counters' (outgoing).
-        # SinkConnectionManager seems to only have had 'replay_counters'.
-        # We need to track outgoing sequence numbers per-connection to avoid replay attacks on the Node side.
         if not hasattr(self, 'out_counters'):
              self.out_counters = {}
              
@@ -168,13 +162,36 @@ class SinkConnectionManager:
         self.out_counters[mac] += 1
         seq = self.out_counters[mac]
         
+        # --- FIX: Garantir que o PAYLOAD é bytes ---
+        if payload is None:
+            payload = b''
+        elif isinstance(payload, str):
+            payload = payload.encode('utf-8')
+        elif not isinstance(payload, bytes):
+            # Tenta converter qualquer outra coisa (int, json object, etc)
+            try:
+                payload = bytes(payload)
+            except:
+                print(f"[Sink-Error] Payload inválido (não convertível para bytes): {type(payload)}")
+                return False
+
         # 1. Pack with Zero MAC
-        temp_packet = PacketHeader.pack(src, dest, msg_type, payload, seq, b'\x00'*32)
+        # O PacketHeader.pack deve retornar bytes. Se não retornar, temos problema no packet_structs.
+        try:
+            temp_packet = PacketHeader.pack(src, dest, msg_type, payload, seq, b'\x00'*32)
+            if not isinstance(temp_packet, bytes):
+                temp_packet = bytes(temp_packet)
+        except Exception as e:
+            print(f"[Sink-Error] Falha no PacketHeader.pack: {e}")
+            return False
         
         # 2. Calculate MAC
-        # We need generate_mac from common.crypto_utils
-        from common.crypto_utils import generate_mac
-        auth_mac = generate_mac(key, temp_packet)
+        try:
+            from common.crypto_utils import generate_mac
+            auth_mac = generate_mac(key, temp_packet)
+        except Exception as e:
+            print(f"[Sink-Error] Erro crítico ao gerar MAC (Key type: {type(key)}, Data type: {type(temp_packet)}): {e}")
+            return False
         
         # 3. Final Pack
         final_packet = PacketHeader.pack(src, dest, msg_type, payload, seq, auth_mac)

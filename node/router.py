@@ -37,6 +37,8 @@ class Router:
         self.replay_counters = {}
         # Map: connection_handle -> my_outgoing_sequence_number (int)
         self.my_counters = {}
+        # Track MACs with incoming handshakes in progress to avoid duplicate handshake attempts
+        self.pending_incoming_handshakes = set()
 
         self.last_heartbeat_time = 0
         self.last_heartbeat_seq = -1
@@ -385,6 +387,51 @@ class Router:
             
         finally:
             handshake_receive_queue.unregister_transport(connection_mac)
+    
+    def handle_incoming_handshake(self, peer_mac):
+        """
+        Respond to an incoming handshake request from a peer node.
+        Called when we detect handshake chunks from a MAC we don't have a session key for.
+        
+        This runs the handshake as the responder (server role).
+        
+        Args:
+            peer_mac: MAC address of the peer initiating the handshake
+        """
+        # Skip if we already have a session key for this peer
+        if peer_mac in self.link_keys:
+            return
+        
+        # Skip if handshake already in progress
+        if peer_mac in self.pending_incoming_handshakes:
+            return
+        
+        # Mark as in progress
+        self.pending_incoming_handshakes.add(peer_mac)
+        
+        def _run_handshake():
+            try:
+                print(f"[Handshake] Responding to incoming handshake from {peer_mac}")
+                session_key = self.perform_handshake(peer_mac, is_initiator=False)
+                
+                # Store the session key and initialize security state
+                self.link_keys[peer_mac] = session_key
+                self.my_counters[peer_mac] = 0
+                self.replay_counters[peer_mac] = 0
+                
+                # Add to downlink connections
+                self.downlink_connections.add(peer_mac)
+                
+                print(f"[Handshake] Incoming handshake from {peer_mac} completed successfully")
+                
+            except Exception as e:
+                print(f"[!] Incoming handshake from {peer_mac} failed: {e}")
+            finally:
+                # Remove from pending set
+                self.pending_incoming_handshakes.discard(peer_mac)
+        
+        # Run handshake in background thread to avoid blocking
+        threading.Thread(target=_run_handshake, daemon=True).start()
 
     def toggle_heartbeat_block(self, child_conn):
         """Ativa/Desativa o envio de heartbeats para um filho específico."""

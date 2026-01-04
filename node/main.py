@@ -69,6 +69,12 @@ class RxCharacteristic(Characteristic):
                 if handshake_receive_queue.route_chunk(mac, total_length, chunk_index, chunk_data):
                     # This was a handshake message, don't process as regular packet
                     print(f"[RX-Handshake] Chunk {chunk_index} from {mac}")
+                    
+                    # If this is the first chunk from an unknown MAC, trigger incoming handshake
+                    if chunk_index == 0 and mac not in self.router.link_keys:
+                        print(f"[RX-Handshake] First chunk from unknown peer {mac}, triggering handshake response")
+                        self.router.handle_incoming_handshake(mac)
+                    
                     return
             except Exception as e:
                 print(f"[!] Error parsing handshake frame: {e}")

@@ -101,7 +101,7 @@ class Router:
                  self.replay_counters[connection_handle] = 0
                  
                  # Multiple Sinks: If we connected directly to a Sink (hops=0), update trusted cert
-                 if hops == 0 and peer_cert:
+                 if parent_hops == 0 and peer_cert:
                      print(f"[Router] Connected directly to Sink {connection_handle}. Updating Trusted Cert.")
                      self.security.update_sink_cert(peer_cert)
                      

@@ -656,9 +656,10 @@ def main():
     app = SinkApplication(BUS, conn_manager)
     app.register()
     
-    # Initialize and register BLE Agent for pairing
-    agent = BLEAgent(BUS)
-    agent.register()
+    # DISABLED: BLE Agent causes unwanted BR/EDR connections that kill LE when they fail
+    # Initialize and register BLE  for pairing
+    # agent = BLEAgent(BUS)
+    # agent.register()
     
     # Start
     conn_manager.start_advertising()

@@ -167,9 +167,10 @@ class Node:
         self.router.app_layer = self.app # Link app layer
         self.app.register()
 
+        # DISABLED: BLE Agent causes unwanted BR/EDR connections that kill LE when they fail
         # Initialize and register BLE Agent for pairing
-        self.agent = BLEAgent(BUS)
-        self.agent.register()
+        # self.agent = BLEAgent(BUS)
+        # self.agent.register()
 
         time.sleep(0.5)
         self.ble_manager.start_advertising()

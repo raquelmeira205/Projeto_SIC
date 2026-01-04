@@ -276,12 +276,14 @@ class Router:
         self.last_heartbeat_time = time.time()
 
         # Re-encapsulate heartbeat for downlinks
-        # NOTE: Header MAC is 0x00*16 for addr? No, src/dest are just headers.
-        # But we must send to each child individually to sign correctly.
+        # Forward heartbeat from Sink to all downlink nodes
+        # Use actual Sink NID as source (not zeros)
         for child in self.downlink_connections:
             if child in self.blocked_downlinks:
                 continue 
-            self._send_authenticated_packet(child, b'\x00'*16, b'\x00'*16, MsgType.HEARTBEAT, payload)
+            # Send heartbeat with correct Sink NID as source
+            # Destination should be broadcast (all zeros) or the child's NID
+            self._send_authenticated_packet(child, src_nid, b'\x00'*16, MsgType.HEARTBEAT, payload)
 
     def _monitor_heartbeat_timeout(self):
         while not self._stop_monitor:
@@ -331,14 +333,59 @@ class Router:
              return False
              
         key = self.link_keys[conn]
+        
+        # --- Type validation and conversion ---
+        # Ensure key is bytes
+        if not isinstance(key, bytes):
+            print(f"[Router-Error] Session key for {conn} is not bytes! Type: {type(key)}")
+            return False
+        
+        # Ensure src is bytes (16-byte NID)
+        if not isinstance(src, bytes):
+            if isinstance(src, str):
+                src = src.encode('utf-8')[:16].ljust(16, b'\x00')
+            else:
+                print(f"[Router-Error] src NID is not bytes! Type: {type(src)}")
+                return False
+        
+        # Ensure dest is bytes (16-byte NID)
+        if not isinstance(dest, bytes):
+            if isinstance(dest, str):
+                dest = dest.encode('utf-8')[:16].ljust(16, b'\x00')
+            else:
+                print(f"[Router-Error] dest NID is not bytes! Type: {type(dest)}")
+                return False
+        
+        # Ensure payload is bytes
+        if payload is None:
+            payload = b''
+        elif isinstance(payload, str):
+            payload = payload.encode('utf-8')
+        elif not isinstance(payload, bytes):
+            try:
+                payload = bytes(payload)
+            except:
+                print(f"[Router-Error] payload is not convertible to bytes! Type: {type(payload)}")
+                return False
+        
         self.my_counters[conn] += 1
         seq = self.my_counters[conn]
         
         # 1. Pack with Zero MAC
-        temp_packet = PacketHeader.pack(src, dest, msg_type, payload, seq, b'\x00'*32)
+        try:
+            temp_packet = PacketHeader.pack(src, dest, msg_type, payload, seq, b'\x00'*32)
+        except Exception as e:
+            print(f"[Router-Error] PacketHeader.pack failed: {e}")
+            print(f"  src type: {type(src)}, dest type: {type(dest)}, payload type: {type(payload)}")
+            return False
         
         # 2. Calculate MAC
-        mac = generate_mac(key, temp_packet)
+        try:
+            mac = generate_mac(key, temp_packet)
+        except Exception as e:
+            print(f"[Router-Error] generate_mac failed: {e}")
+            print(f"  key type: {type(key)}, temp_packet type: {type(temp_packet)}")
+            return False
         
         # 3. Final Pack
         final_packet = PacketHeader.pack(src, dest, msg_type, payload, seq, mac)

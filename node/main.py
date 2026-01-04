@@ -58,6 +58,9 @@ class RxCharacteristic(Characteristic):
         if device_path and "dev_" in device_path:
             mac = device_path.split("dev_")[1].replace("_", ":")
 
+        # DEBUG: Show first bytes to diagnose handshake detection issue
+        print(f"[RX-DEBUG] {len(data)} bytes from {mac}, first 10 bytes: {data[:10].hex()}")
+
         # Check if this is handshake data (starts with 0xFF marker)
         if len(data) >= 7 and data[0] == 0xFF:
             try:

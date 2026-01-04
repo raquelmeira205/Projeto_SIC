@@ -35,6 +35,8 @@ class NodeCLI:
         """Print a one-line status update"""
         uplink = self.node.ble_manager.uplink_addr
         hop = self.node.ble_manager.hop_count
+        if hop == 255: hop = -1
+        
         downlinks = len(self.node.router.downlink_connections)
         lost_hb = self.node.router.stats['lost_heartbeats']
         routed = self.node.router.stats['routed_messages']

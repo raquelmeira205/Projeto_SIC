@@ -68,12 +68,26 @@ class Router:
 
         threading.Thread(target=self._monitor_heartbeat_timeout, daemon=True).start()
 
-    def set_uplink(self, connection_handle, hops):
+    def set_uplink(self, connection_handle, parent_hops):
         self.uplink_connection = connection_handle
-        self.hops_to_sink = hops + 1
-        self.last_heartbeat_time = time.time()
+        
+        # Lógica de Hop Count Corrigida
+        # Se o pai for 255 (Unknown/-1) ou 0xFF, nós ficamos indefinidos também
+        if parent_hops == 255 or parent_hops == -1:
+            self.hops_to_sink = -1
+            ble_hop_val = 255
+        else:
+            # Incrementa corretamente
+            self.hops_to_sink = parent_hops + 1
+            ble_hop_val = self.hops_to_sink
 
-        print(f"[Router] Conectado a {connection_handle}. A aguardar estabilização do link...")
+        # Atualiza o BLE Manager para a Publicidade (Advertisement) estar correta
+        self.ble.hop_count = ble_hop_val
+        self.ble.update_advertisement()
+
+        self.last_heartbeat_time = time.time()
+        print(f"[Router] Conectado a {connection_handle}. Hop Count: {self.hops_to_sink}")
+
         # pausa para o BlueZ negociar MTU e intervalos
         time.sleep(2.0)
 
@@ -310,9 +324,12 @@ class Router:
             # Also update BLE manager's uplink tracking
             self.ble.uplink_addr = incoming_conn
             self.ble.uplink_nid = src_nid
-            # Hop count will be set to 1 (connected to Sink with hop=0)
-            self.ble.hop_count = 1
-            self.hops_to_sink = 1
+            
+            # --- CORREÇÃO: REMOVER ESTAS LINHAS ---
+            # self.ble.hop_count = 1   <-- APAGAR ISTO (Isto forçava Hop 1 erradamente)
+            # self.hops_to_sink = 1    <-- APAGAR ISTO
+            # --------------------------------------
+            
             self.ble.update_advertisement()
 
         # Capturar Sink NID e detetar Mudança de Sink
@@ -384,7 +401,14 @@ class Router:
             del self.downlink_missed_heartbeats[conn]
 
         if conn == self.uplink_connection:
+            print("[Router] Uplink perdido. Resetting Hop Count.")
             self.uplink_connection = None
+            
+            # Reset Hop Count para -1 (Desligado)
+            self.hops_to_sink = -1
+            self.ble.hop_count = 255 # 255 significa "Unknown/Infinity" no BLE
+            self.ble.update_advertisement()
+            
             self.hops_to_sink = -1
             self.forwarding_table.clear()
 

@@ -434,7 +434,7 @@ class Router:
                 print(f"[Handshake-Debug] After extraction: type={type(session_key)}")
             
             if not isinstance(session_key, bytes):
-                raise RuntimeError(f"Session key is not bytes! Type: {type(session_key)}, Value: {session_key}")
+                raise RuntimeError(f"Session key is not bytes! Type: {type(session_key)}, Value: {session_key}\n {session_key}")
             
             if not session_key or len(session_key) != 32:
                 raise RuntimeError(f"Invalid session key derived: len={len(session_key) if session_key else 0}")

@@ -469,6 +469,18 @@ class RxCharacteristic(Characteristic):
              # 1. Unpack Packet
             src_nid, dest_nid, msg_type, payload, seq_num, received_mac = PacketHeader.unpack(val_bytes)
             
+            ## mecanismo de defesa erro de bytes
+            if payload is None:
+                payload = b''
+            elif isinstance(payload, str):
+                try:
+                    payload = payload.encode('utf-8')
+                except:
+                    payload = b''
+            elif not isinstance(payload, bytes):
+                return # Ignora silenciosamente para não crashar
+
+
             # 2. Security Verification
             if mac not in self.conn_manager.session_keys:
                 print(f"[!] Security Alert: Received packet from {mac} without active session")

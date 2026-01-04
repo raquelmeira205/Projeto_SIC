@@ -18,40 +18,56 @@ class HeartbeatService:
 
     def _heartbeat_loop(self):
         print("[Sink] Serviço de Heartbeat iniciado.")
+        
+        # Pequeno delay inicial para garantir que tudo arrancou
+        time.sleep(2)
+
         while self.running:
-            data_to_sign = self.sequence_number.to_bytes(4, 'big')
-            signature = self.security.sign_data(data_to_sign)
-            
-            hb_payload = HeartbeatPayload.pack(self.sequence_number, signature)
-            
-            packet = PacketHeader.pack(
-                source_nid=self.sink_nid,
-                dest_nid=b'\x00'*16, 
-                msg_type=MsgType.HEARTBEAT,
-                payload=hb_payload
-            )
+            try:
+                # 1. Preparar os dados a assinar (Sequence Number)
+                data_to_sign = self.sequence_number.to_bytes(4, 'big')
+                
+                # 2. Assinar com a chave privada do Sink
+                signature = self.security.sign_data(data_to_sign)
+                
+                # 3. Empacotar o Payload do Heartbeat (Seq + Assinatura)
+                hb_payload = HeartbeatPayload.pack(self.sequence_number, signature)
+                
+                # Garantia de segurança: Converter explicitamente para bytes
+                if not isinstance(hb_payload, bytes):
+                    hb_payload = bytes(hb_payload)
 
-            print(f"[Sink] A enviar Heartbeat #{self.sequence_number}")
-            
-            # Send to all authenticated links
-            # Must iterate over keys to get MACs
-            # Use list() to avoid runtime error if dict changes size
-            if hasattr(self.conn_manager, 'session_keys'):
-                for mac in list(self.conn_manager.session_keys.keys()):
-                    # Heartbeats don't strictly need MAC (Node skips verification), 
-                    # but using send_authenticated_packet is consistent and handles sequence numbers.
-                    # Note: We pass original packet components to send_authenticated_packet
-                    # payload is hb_payload
-                    self.conn_manager.send_authenticated_packet(
-                        mac, 
-                        self.sink_nid, 
-                        b'\x00'*16, 
-                        MsgType.HEARTBEAT, 
-                        hb_payload
-                    )
+                print(f"[Sink] A enviar Heartbeat #{self.sequence_number} (Payload: {len(hb_payload)} bytes)")
+                
+                # 4. Enviar para todos os nós autenticados
+                if hasattr(self.conn_manager, 'session_keys'):
+                    # Usar list() cria uma cópia segura das chaves para iterar
+                    connected_macs = list(self.conn_manager.session_keys.keys())
+                    
+                    if not connected_macs:
+                        # print("[Sink] Sem nós conectados para enviar Heartbeat.")
+                        pass
 
-            self.sequence_number += 1
-            time.sleep(5) 
+                    for mac in connected_macs:
+                        try:
+                            # A função send_authenticated_packet já trata do cabeçalho e MAC do pacote
+                            self.conn_manager.send_authenticated_packet(
+                                mac, 
+                                self.sink_nid, 
+                                b'\x00'*16, # Broadcast NID
+                                MsgType.HEARTBEAT, 
+                                hb_payload
+                            )
+                        except Exception as e:
+                            print(f"[Sink] Falha ao enviar Heartbeat para {mac}: {e}")
+
+                self.sequence_number += 1
+                
+            except Exception as e:
+                print(f"[Sink] Erro crítico no loop de Heartbeat: {e}")
+            
+            # Esperar pelo próximo ciclo
+            time.sleep(10) # Aumentei para 10s para reduzir spam no log enquanto debugas
 
     def stop(self):
         self.running = False

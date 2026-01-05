@@ -50,5 +50,32 @@ def main():
     ca_utils.guardar_cert(node_b_cert, os.path.join(output_dir, "nodeB.crt"))
     print("Node B pronto.")
 
+    # ----- Node C -----
+    print("A gerar certificado Node C...")
+    node_c_key, node_c_cert = ca_utils.emitir_certificado(
+        ca_key, ca_cert, "Node C", is_sink=False, nid=3
+    )
+    ca_utils.guardar_chave(node_c_key, os.path.join(output_dir, "nodeC.key"))
+    ca_utils.guardar_cert(node_c_cert, os.path.join(output_dir, "nodeC.crt"))
+    print("Node C pronto.")
+
+    # ----- Node D -----
+    print("A gerar certificado Node D...")
+    node_d_key, node_d_cert = ca_utils.emitir_certificado(
+        ca_key, ca_cert, "Node D", is_sink=False, nid=4
+    )
+    ca_utils.guardar_chave(node_d_key, os.path.join(output_dir, "nodeD.key"))
+    ca_utils.guardar_cert(node_d_cert, os.path.join(output_dir, "nodeD.crt"))
+    print("Node D pronto.")
+
+    # ----- Node E -----
+    print("A gerar certificado Node E...")
+    node_e_key, node_e_cert = ca_utils.emitir_certificado(
+        ca_key, ca_cert, "Node E", is_sink=False, nid=5
+    )
+    ca_utils.guardar_chave(node_e_key, os.path.join(output_dir, "nodeE.key"))
+    ca_utils.guardar_cert(node_e_cert, os.path.join(output_dir, "nodeE.crt"))
+    print("Node E pronto.")
+
 if __name__ == "__main__":
     main()
